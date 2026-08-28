@@ -23,7 +23,7 @@
 #include "core/config.h"
 #include "core/types.h"
 
-#include "ref_mining.h"
+#include "../harness/ref_mining.h"
 
 using namespace mss;
 
