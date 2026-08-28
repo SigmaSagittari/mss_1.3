@@ -41,21 +41,21 @@ struct Distribution {
 
     // ── 池 ──
 
-    // 分布池：const Shape* → const Distribution*，只增不删。
-    // 同一 interned Shape 必然同一分布；指针键复用 shape 身份，不重复哈希。
+    // 分布池：Shape 内容哈希 → const Distribution*，只增不删。
+    // 键 = shape.hash（内容指纹，Structure::ShapePool::intern 时写入）：
+    //   同一内容必然同一分布；跨盘面 / 跨 ShapePool 命中也合法——
+    //   哈希相等 ⟹ Shape 内容相等 ⟹ 分布（ways/期望只由内容决定）相等。
+    // 不能用 Shape* 指针做键：指针只在所属 ShapePool 生命周期内稳定，
+    // 跨盘面新建 ShapePool 时堆地址会被 malloc 复用，旧指针命中旧分布，
+    // 导致 Exact::analyze 的 boxProbs 变成 NaN / 值反转（实测污染）。
     struct DistPool {
         const Distribution* get(const Structure::Shape* shape);
         const Distribution* get(const Structure::Shape* shape) const;
         const Distribution* insert(const Structure::Shape* shape, Distribution dist);
 
     private:
-        struct Hash {
-            std::size_t operator()(const Structure::Shape* p) const noexcept {
-                return SplitMix64Hash{}(reinterpret_cast<std::uintptr_t>(p));
-            }
-        };
         std::vector<std::unique_ptr<Distribution>> dists_;  // 稳定地址，只增不删
-        FlatHashTable<const Structure::Shape*, const Distribution*, Hash> index_;
+        FlatHashTable<U128, const Distribution*, U128Hash> index_;
     };
 
     // ── 算法类（纯空壳）──
@@ -89,12 +89,12 @@ struct Distribution {
 // ── 实现区 ──
 
 inline const Distribution* Distribution::DistPool::get(const Structure::Shape* shape) {
-    if (const Distribution** found = index_.find(shape)) return *found;
+    if (const Distribution** found = index_.find(shape->hash)) return *found;
     return nullptr;
 }
 
 inline const Distribution* Distribution::DistPool::get(const Structure::Shape* shape) const {
-    if (const Distribution* const* found = index_.find(shape)) return *found;
+    if (const Distribution* const* found = index_.find(shape->hash)) return *found;
     return nullptr;
 }
 
@@ -102,7 +102,7 @@ inline const Distribution* Distribution::DistPool::insert(const Structure::Shape
                                                           Distribution dist) {
     if (const Distribution* found = get(shape)) return found;
     dists_.push_back(std::make_unique<Distribution>(std::move(dist)));
-    index_.emplace(shape, dists_.back().get());
+    index_.emplace(shape->hash, dists_.back().get());
     return dists_.back().get();
 }
 

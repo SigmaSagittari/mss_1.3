@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "core/assert.h"
 #include "core/types.h"
 
 namespace mss {
@@ -198,82 +199,37 @@ inline Basic::Delta Basic::Updater::update(const ObservedBoard& board,
         delta.changes.push_back({board.id(x, y), oldMark, m});
     };
 
-    // 撤销 (x,y) 周围失去支持的 Mine：只有仍被某个 satisfied 数字
-    // （隐藏数 == 数字值）支持的 Mine 保留，否则降级为 Frontier。
-    auto reconsiderMinesAround = [&](int x, int y) {
-        forEachAdjacent(x, y, rows, cols, [&](int mx, int my) {
-            if (result.marks[mx][my] != Mark::Mine) return;
-            bool supported = false;
-            forEachAdjacent(mx, my, rows, cols, [&](int nx, int ny) {
-                if (!isNumber(board.board[nx][ny])) return;
-                int hiddenCount = 0;
-                forEachAdjacent(nx, ny, rows, cols, [&](int ax, int ay) {
-                    if (board.board[ax][ay] == Cell::Hidden) ++hiddenCount;
-                });
-                if (hiddenCount == numberValue(board.board[nx][ny]))
-                    supported = true;
-            });
-            if (!supported) setMark(mx, my, Mark::Frontier);
-        });
-    };
+    // 只支持"揭示"类更新（opens 一个隐藏格为数字 0..8）。
+    // 回滚（next == Cell::Hidden）已移除：它会解除数字饱和、在事件第 2 环把
+    // Mine 翻回 Frontier，破坏结构增量更新的"组件原子性"闭包（需两环标脏）。
+    // 纯揭示世界里新标雷必在事件所属组件内，单环（事件+八邻域）即闭环。
+    for (const Update& u : updates)
+        assert_(u.next != Cell::Hidden,
+                "Basic::Updater: 不支持回滚更新（next 必须为数字 0..8）");
 
     for (const Update& u : updates) {
         const auto [x, y] = board.pos(u.cell);
 
-        if (u.next == Cell::Hidden) {
-            // 覆盖数字（搜索回滚）：切开结构。
-            // 被覆盖格本身：仍邻接数字 → Frontier，否则 Unknown。
-            bool hasAdjacentNumber = false;
-            forEachAdjacent(x, y, rows, cols, [&](int nx, int ny) {
-                if (isNumber(board.board[nx][ny])) hasAdjacentNumber = true;
-            });
-            setMark(x, y, hasAdjacentNumber ? Mark::Frontier : Mark::Unknown);
+        // 翻开数字：被翻格标 Safe（已揭示，非推理），只加 Frontier / Mine。
+        setMark(x, y, Mark::Safe);
+        forEachAdjacent(x, y, rows, cols, [&](int nx, int ny) {
+            // 邻居隐藏格：Unknown → Frontier。
+            if (board.board[nx][ny] == Cell::Hidden && result.marks[nx][ny] == Mark::Unknown)
+                setMark(nx, ny, Mark::Frontier);
 
-            // 被覆盖的数字消失，撤销它对周围 Mine 的判定权。
-            reconsiderMinesAround(x, y);
-
-            // 相邻数字的隐藏格数量增加 1；原本恰好满足的数字需要重判其 Mine。
-            forEachAdjacent(x, y, rows, cols, [&](int nx, int ny) {
-                if (!isNumber(board.board[nx][ny])) return;
-                int hiddenCount = 0;
-                forEachAdjacent(nx, ny, rows, cols, [&](int ax, int ay) {
-                    if (board.board[ax][ay] == Cell::Hidden) ++hiddenCount;
-                });
-                if (hiddenCount == numberValue(board.board[nx][ny]) + 1)
-                    reconsiderMinesAround(nx, ny);
+            // 数字 == 周围隐藏数 → 周围隐藏格全部是雷。
+            if (!isNumber(board.board[nx][ny])) return;
+            int hiddenCount = 0;
+            forEachAdjacent(nx, ny, rows, cols, [&](int ax, int ay) {
+                if (board.board[ax][ay] == Cell::Hidden) ++hiddenCount;
             });
-
-            // 失去所有数字邻接的 Frontier → Unknown。
-            forEachAdjacent(x, y, rows, cols, [&](int nx, int ny) {
-                if (result.marks[nx][ny] != Mark::Frontier) return;
-                bool hasNumber = false;
-                forEachAdjacent(nx, ny, rows, cols, [&](int ax, int ay) {
-                    if (isNumber(board.board[ax][ay])) hasNumber = true;
-                });
-                if (!hasNumber) setMark(nx, ny, Mark::Unknown);
+            if (hiddenCount != numberValue(board.board[nx][ny])) return;
+            forEachAdjacent(nx, ny, rows, cols, [&](int ax, int ay) {
+                if (board.board[ax][ay] != Cell::Hidden) return;
+                if (result.marks[ax][ay] == Mark::Mine) return;
+                setMark(ax, ay, Mark::Mine);
             });
-        } else {
-            // 翻开数字：被翻格标 Safe（已揭示，非推理），只加 Frontier / Mine。
-            setMark(x, y, Mark::Safe);
-            forEachAdjacent(x, y, rows, cols, [&](int nx, int ny) {
-                // 邻居隐藏格：Unknown → Frontier。
-                if (board.board[nx][ny] == Cell::Hidden && result.marks[nx][ny] == Mark::Unknown)
-                    setMark(nx, ny, Mark::Frontier);
-
-                // 数字 == 周围隐藏数 → 周围隐藏格全部是雷。
-                if (!isNumber(board.board[nx][ny])) return;
-                int hiddenCount = 0;
-                forEachAdjacent(nx, ny, rows, cols, [&](int ax, int ay) {
-                    if (board.board[ax][ay] == Cell::Hidden) ++hiddenCount;
-                });
-                if (hiddenCount != numberValue(board.board[nx][ny])) return;
-                forEachAdjacent(nx, ny, rows, cols, [&](int ax, int ay) {
-                    if (board.board[ax][ay] != Cell::Hidden) return;
-                    if (result.marks[ax][ay] == Mark::Mine) return;
-                    setMark(ax, ay, Mark::Mine);
-                });
-            });
-        }
+        });
     }
 
     delta.unknownSum = result.unknownSum;

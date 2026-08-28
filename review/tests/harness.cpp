@@ -265,25 +265,23 @@ static void testBasicUpdater(Gen& g, int iter) {
         const Basic::Result root = res;
         const ObservedBoard rootBoard = b;
 
-        const int steps = 1 + g.rng.below(6);
+        int steps = 1 + g.rng.below(6);
         std::vector<Basic::Delta> deltas;
         std::vector<Basic::Update> allUpdates;
         for (int s = 0; s < steps; ++s) {
             const int failsBefore = T::fails;
-            // 随机选：reveal 一个非雷隐藏格，或回滚一个已揭示数字格
-            // （雷格不可翻开：翻开即死，不是合法盘面演化）
-            std::vector<std::pair<int, int>> hidden, shown;
+            // 随机选一个非雷隐藏格揭示（只支持揭示更新：回滚已被库断言禁止）
+            std::vector<std::pair<int, int>> hidden;
             for (int i = 1; i <= rows; ++i)
                 for (int j = 1; j <= cols; ++j) {
                     const bool isMineCell =
                         trueMine[static_cast<std::size_t>(rb.flat(i, j))];
                     if (b.board[i][j] == Cell::Hidden && !isMineCell)
                         hidden.emplace_back(i, j);
-                    else if (b.board[i][j] != Cell::Hidden)
-                        shown.emplace_back(i, j);
                 }
+            if (hidden.empty()) { steps = s; break; }  // 无可揭示格：提前结束本盘步骤
             std::vector<Basic::Update> ups;
-            if (!hidden.empty() && (shown.empty() || g.rng.below(2) == 0)) {
+            {
                 const auto [i, j] = hidden[g.rng.below(static_cast<int>(hidden.size()))];
                 int v = 0;
                 ref::forEa(i, j, rows, cols, [&](int ni, int nj) {
@@ -291,10 +289,6 @@ static void testBasicUpdater(Gen& g, int iter) {
                 });
                 b.board[i][j] = toCell(v);
                 ups.push_back({b.id(i, j), b.board[i][j]});
-            } else {
-                const auto [i, j] = shown[g.rng.below(static_cast<int>(shown.size()))];
-                b.board[i][j] = Cell::Hidden;
-                ups.push_back({b.id(i, j), Cell::Hidden});
             }
             Basic::Delta d = Basic::Updater::update(b, res, ups);
             deltas.push_back(d);
@@ -374,10 +368,106 @@ static void testBasicUpdater(Gen& g, int iter) {
     }
 }
 
+static bool g_t3Dumped = false;
+
+static void dumpT3Mismatch(int it, int s, const ObservedBoard& b,
+                           const Basic::Result& basic, const Structure::Result& root,
+                           const Structure::Result& full,
+                           const std::vector<std::tuple<int, int, int, int>>& markFlips,
+                           const std::vector<Basic::Update>& ups) {
+    FILE* f = std::fopen("dump_t3_mismatch.txt", "w");
+    if (!f) return;
+    std::fprintf(f, "it=%d step=%d rows=%d cols=%d mines=%d\n", it, s, b.rows, b.cols,
+                 b.totalMines);
+    std::fprintf(f, "updates:");
+    for (const auto& u : ups) {
+        const auto [x, y] = b.pos(u.cell);
+        std::fprintf(f, " (%d,%d)->%s", x, y,
+                     u.next == Cell::Hidden ? "H" : std::to_string(static_cast<int>(u.next)).c_str());
+    }
+    std::fprintf(f, "\nmark flips (x,y,old->new,distToEvents):\n");
+    for (const auto& [fx, fy, fo, fn] : markFlips) {
+        int dist = 99;
+        for (const auto& u : ups) {
+            const auto [ex, ey] = b.pos(u.cell);
+            dist = (std::min)(dist, (std::max)(std::abs(fx - ex), std::abs(fy - ey)));
+        }
+        std::fprintf(f, "  (%d,%d) %d->%d dist=%d\n", fx, fy, fo, fn, dist);
+    }
+    for (int i = 1; i <= b.rows; ++i) {
+        for (int j = 1; j <= b.cols; ++j)
+            std::fprintf(f, "%s ", b.board[i][j] == Cell::Hidden
+                                       ? "."
+                                       : std::to_string(static_cast<int>(b.board[i][j])).c_str());
+        std::fprintf(f, "\n");
+    }
+    std::fprintf(f, "marks:\n");
+    for (int i = 1; i <= b.rows; ++i) {
+        for (int j = 1; j <= b.cols; ++j)
+            std::fprintf(f, "%d ", static_cast<int>(basic.marks[i][j]));
+        std::fprintf(f, "\n");
+    }
+    auto dumpSide = [&](const char* tag, const Structure::Result& r) {
+        std::fprintf(f, "--- %s comps=%zu ---\n", tag, r.components.size());
+        for (std::size_t c = 0; c < r.components.size(); ++c) {
+            const auto& inst = r.components[c];
+            std::fprintf(f, "  c%zu hash=%016llx%016llx\n", c,
+                         (unsigned long long)inst.shape->hash.hi,
+                         (unsigned long long)inst.shape->hash.lo);
+            for (std::size_t bb = 0; bb < inst.boxes.count(); ++bb) {
+                std::fprintf(f, "    box%zu =", bb);
+                std::vector<CellId> ids(inst.boxes.cells.begin() + inst.boxes.boxOf[bb],
+                                        inst.boxes.cells.begin() + inst.boxes.boxOf[bb + 1]);
+                std::sort(ids.begin(), ids.end());
+                for (CellId cid : ids) {
+                    const auto [x, y] = b.pos(cid);
+                    std::fprintf(f, " (%d,%d)", x, y);
+                }
+                std::fprintf(f, "\n");
+            }
+            for (std::size_t ci = 0; ci < inst.shape->constraints.size(); ++ci) {
+                const auto& lim = inst.shape->constraints[ci];
+                std::fprintf(f, "    cons sum=%d refs=", lim.sum);
+                for (BoxId bid : lim.boxIds) {
+                    std::vector<CellId> ids(inst.boxes.cells.begin() +
+                                                inst.boxes.boxOf[static_cast<std::size_t>(bid)],
+                                            inst.boxes.cells.begin() +
+                                                inst.boxes.boxOf[static_cast<std::size_t>(bid) + 1]);
+                    std::sort(ids.begin(), ids.end());
+                    std::fprintf(f, "{");
+                    for (CellId cid : ids) {
+                        const auto [x, y] = b.pos(cid);
+                        std::fprintf(f, "(%d,%d)", x, y);
+                    }
+                    std::fprintf(f, "}");
+                }
+                std::fprintf(f, "\n");
+            }
+            std::fprintf(f, "    constraintCells:");
+            for (CellId cid : inst.constraintCells) {
+                const auto [x, y] = b.pos(cid);
+                std::fprintf(f, " (%d,%d)", x, y);
+            }
+            std::fprintf(f, "\n");
+        }
+        std::fprintf(f, "  cellLoc:");
+        for (std::size_t k = 0; k < r.cellLoc.size(); ++k) {
+            const CellLocation& loc = r.cellLoc[k];
+            if (loc.component != -1) std::fprintf(f, " %zu=c%d/b%d", k, loc.component, loc.box);
+        }
+        std::fprintf(f, "\n");
+    };
+    dumpSide("root(incremental)", root);
+    dumpSide("full(analyze)", full);
+    std::fclose(f);
+    g_t3Dumped = true;
+}
+
 // ── 测试 3：Structure::Updater::update + applyDelta == 全量重析 ──
 static void dumpT3Call(int id, const char* tag, const ObservedBoard& b,
                        const Basic::Result& basic, const Structure::Result& r,
-                       const std::vector<Basic::Update>& ups) {
+                       const std::vector<Basic::Update>& ups,
+                       const std::vector<std::tuple<int, int, int, int>>& flips) {
     char path[64];
     std::snprintf(path, sizeof(path), "dumpT3/%03d_%s.txt", id, tag);
     FILE* f = std::fopen(path, "w");
@@ -424,6 +514,16 @@ static void dumpT3Call(int id, const char* tag, const ObservedBoard& b,
         }
         std::fprintf(f, "\n");
     }
+    std::fprintf(f, "flips:");
+    for (const auto& [fx, fy, fo, fn] : flips) {
+        int dist = 99;
+        for (const auto& u : ups) {
+            const auto [ex, ey] = b.pos(u.cell);
+            dist = (std::min)(dist, (std::max)(std::abs(fx - ex), std::abs(fy - ey)));
+        }
+        std::fprintf(f, " (%d,%d)%d->%d@%d", fx, fy, fo, fn, dist);
+    }
+    std::fprintf(f, "\n");
     std::fclose(f);
 }
 
@@ -506,20 +606,21 @@ static void testStructureUpdate(Gen& g, int iter) {
         const ObservedBoard rootBoard = b;
 
         std::vector<Structure::Delta> deltas;
-        const int steps = 1 + g.rng.below(5);
+        Basic::Result prevBasic = basic;
+        int steps = 1 + g.rng.below(5);
         for (int s = 0; s < steps; ++s) {
-            std::vector<std::pair<int, int>> hidden, shown;
+            // 随机选一个非雷隐藏格揭示（T3 同 T2：只支持揭示更新）
+            std::vector<std::pair<int, int>> hidden;
             for (int i = 1; i <= rows; ++i)
                 for (int j = 1; j <= cols; ++j) {
                     const bool isMineCell =
                         trueMine[static_cast<std::size_t>(rb.flat(i, j))];
                     if (b.board[i][j] == Cell::Hidden && !isMineCell)
                         hidden.emplace_back(i, j);
-                    else if (b.board[i][j] != Cell::Hidden)
-                        shown.emplace_back(i, j);
                 }
+            if (hidden.empty()) { steps = s; break; }  // 无可揭示格：提前结束本盘步骤
             std::vector<Basic::Update> ups;
-            if (!hidden.empty() && (shown.empty() || g.rng.below(2) == 0)) {
+            {
                 const auto [i, j] = hidden[g.rng.below(static_cast<int>(hidden.size()))];
                 int v = 0;
                 ref::forEa(i, j, rows, cols, [&](int ni, int nj) {
@@ -527,13 +628,21 @@ static void testStructureUpdate(Gen& g, int iter) {
                 });
                 b.board[i][j] = toCell(v);
                 ups.push_back({b.id(i, j), b.board[i][j]});
-            } else {
-                const auto [i, j] = shown[g.rng.below(static_cast<int>(shown.size()))];
-                b.board[i][j] = Cell::Hidden;
-                ups.push_back({b.id(i, j), Cell::Hidden});
             }
             Basic::Result nextBasic = Basic::Analyzer::analyze(b);  // 全量基准
-            dumpT3Call(1000 * it + s, "pre_update", b, nextBasic, root, ups);
+            // 诊断：记录本次更新前后 basic 标记变化（相对上一步/初始的 marks）
+            std::vector<std::tuple<int, int, int, int>> markFlips;  // x,y,old,new
+            {
+                const Basic::Result& before = s == 0 ? basic : prevBasic;
+                for (int i = 1; i <= b.rows; ++i)
+                    for (int j = 1; j <= b.cols; ++j)
+                        if (static_cast<int>(before.marks[i][j]) !=
+                            static_cast<int>(nextBasic.marks[i][j]))
+                            markFlips.emplace_back(i, j, static_cast<int>(before.marks[i][j]),
+                                                   static_cast<int>(nextBasic.marks[i][j]));
+            }
+            prevBasic = nextBasic;
+            dumpT3Call(1000 * it + s, "pre_update", b, nextBasic, root, ups, markFlips);
             Structure::Delta d =
                 Structure::Updater::update(b, nextBasic, root, pool, ups);
             dumpT3Delta(1000 * it + s, b, d);
@@ -541,50 +650,88 @@ static void testStructureUpdate(Gen& g, int iter) {
             deltas.push_back(d);
 
             const Structure::Result full = Structure::Analyzer::analyze(b, nextBasic, pool);
-            // 顺序无关比较：组件按 (hash, cells, boxOf, constraintCells) 对齐成多重集合，
-            // 再按对齐关系核对 cellLoc（component 身份与 box 编号）。
-            using CompKey = std::tuple<U128, std::vector<CellId>, std::vector<std::uint16_t>,
-                                       std::vector<CellId>>;
-            auto compKey = [](const Structure::Instance& c) {
-                return CompKey(c.shape->hash, c.boxes.cells, c.boxes.boxOf,
-                               c.constraintCells);
+            // 语义等价比较（box 编号无关、约束顺序无关）：
+            // 组件 token = box 分区（盒内 CellId 排序取集 + 全集排序）
+            //           + 约束多集（(sum, 引用的 box 集列表，列表内/外均排序)）。
+            // shape 哈希依赖 DFS 起点（box 首次出现顺序），增量/全量路径起点不同，
+            // 哈希可能不同但内容等价，故不直接比较哈希。
+            auto compToken = [&](const Structure::Instance& c) {
+                std::vector<std::vector<CellId>> boxSets;
+                for (std::size_t bb = 0; bb < c.boxes.count(); ++bb) {
+                    std::vector<CellId> s(c.boxes.cells.begin() + c.boxes.boxOf[bb],
+                                          c.boxes.cells.begin() + c.boxes.boxOf[bb + 1]);
+                    std::sort(s.begin(), s.end());
+                    boxSets.push_back(std::move(s));
+                }
+                std::sort(boxSets.begin(), boxSets.end());
+                std::vector<std::pair<int, std::vector<std::vector<CellId>>>> cons;
+                for (std::size_t ci = 0; ci < c.shape->constraints.size(); ++ci) {
+                    const auto& lim = c.shape->constraints[ci];
+                    std::vector<std::vector<CellId>> refs;
+                    for (BoxId bid : lim.boxIds)
+                        refs.push_back([&] {
+                            std::vector<CellId> s(
+                                c.boxes.cells.begin() + c.boxes.boxOf[static_cast<std::size_t>(bid)],
+                                c.boxes.cells.begin() +
+                                    c.boxes.boxOf[static_cast<std::size_t>(bid) + 1]);
+                            std::sort(s.begin(), s.end());
+                            return s;
+                        }());
+                    std::sort(refs.begin(), refs.end());
+                    cons.emplace_back(lim.sum, std::move(refs));
+                }
+                std::sort(cons.begin(), cons.end());
+                return std::tuple<std::vector<std::vector<CellId>>,
+                                  std::vector<std::pair<int, std::vector<std::vector<CellId>>>>>(
+                    std::move(boxSets), std::move(cons));
             };
-            std::map<CompKey, int> setA, setB;
-            std::vector<CompKey> keyListA, keyListB;
-            for (const auto& c : root.components) {
-                setA[compKey(c)]++;
-                keyListA.push_back(compKey(c));
-            }
-            for (const auto& c : full.components) {
-                setB[compKey(c)]++;
-                keyListB.push_back(compKey(c));
-            }
+            using TKey = decltype(compToken(std::declval<const Structure::Instance&>()));
+            std::map<TKey, int> setA, setB;
+            std::vector<TKey> keyListA, keyListB;
+            for (const auto& c : root.components) { setA[compToken(c)]++; keyListA.push_back(compToken(c)); }
+            for (const auto& c : full.components) { setB[compToken(c)]++; keyListB.push_back(compToken(c)); }
             bool same = (setA == setB);
             if (same) {
-                auto idxOf = [](const std::vector<CompKey>& keys,
-                                const CompKey& k) -> int {
-                    for (int i = 0; i < static_cast<int>(keys.size()); ++i)
-                        if (keys[static_cast<std::size_t>(i)] == k) return i;
-                    return -1;
+                // 组件内每 box 的排序格集（双份），用于 cellLoc 的 box 对齐
+                auto boxSetsOf = [](const Structure::Instance& c) {
+                    std::vector<std::vector<CellId>> s;
+                    for (std::size_t bb = 0; bb < c.boxes.count(); ++bb) {
+                        std::vector<CellId> v(c.boxes.cells.begin() + c.boxes.boxOf[bb],
+                                              c.boxes.cells.begin() + c.boxes.boxOf[bb + 1]);
+                        std::sort(v.begin(), v.end());
+                        s.push_back(std::move(v));
+                    }
+                    return s;
                 };
                 const std::size_t cellN = static_cast<std::size_t>((rows + 1) * (cols + 1));
                 for (std::size_t k = 0; k < cellN; ++k) {
                     const CellLocation& la = root.cellLoc[k];
                     const CellLocation& lb = full.cellLoc[k];
-                    if (la.component == -1 || lb.component == -1) {
-                        if (la.component != lb.component) { same = false; break; }
+                    const bool unboundA = (la.component == -1);
+                    const bool unboundB = (lb.component == -1);
+                    if (unboundA || unboundB) {
+                        if (unboundA != unboundB) { same = false; break; }
                         continue;
                     }
-                    const int ia = idxOf(keyListA, keyListA[static_cast<std::size_t>(la.component)]);
-                    const int ib = idxOf(keyListB, keyListB[static_cast<std::size_t>(lb.component)]);
-                    const bool sameComp = (ia == ib &&
-                                           keyListA[static_cast<std::size_t>(ia)] ==
-                                               keyListB[static_cast<std::size_t>(ib)]);
-                    if (!sameComp || la.box != lb.box) { same = false; break; }
+                    const TKey& ka = keyListA[static_cast<std::size_t>(la.component)];
+                    const TKey& kb = keyListB[static_cast<std::size_t>(lb.component)];
+                    if (ka != kb) { same = false; break; }
+                    // box 对齐：按排序格集比较
+                    const auto ba = boxSetsOf(root.components[static_cast<std::size_t>(la.component)]);
+                    const auto bb2 = boxSetsOf(full.components[static_cast<std::size_t>(lb.component)]);
+                    const bool boxUnboundA = (la.box == -1);
+                    const bool boxUnboundB = (lb.box == -1);
+                    if (boxUnboundA != boxUnboundB) { same = false; break; }
+                    if (!boxUnboundA) {
+                        if (ba[static_cast<std::size_t>(la.box)] !=
+                            bb2[static_cast<std::size_t>(lb.box)])
+                        { same = false; break; }
+                    }
                 }
             }
             CHECK(same, "structure mismatch after step %d it=%d (comps %zu vs %zu)",
                   s, it, root.components.size(), full.components.size());
+            if (!same) dumpT3Mismatch(it, s, b, nextBasic, root, full, markFlips, ups);
         }
 
         // Delta 重放：fresh root → applyDelta 链 == 最终增量状态
@@ -829,55 +976,8 @@ static int libBest(const EndgameBruteforce::Result& r) {
     return b;
 }
 
-static void dumpT6(const ref::RefBoard& rb, const ObservedBoard& b,
-                   const Basic::Result& basic,
-                   const std::vector<std::vector<int>>& ps,
-                   const EndgameBruteforce::Result& lib,
-                   const std::vector<int>& naiveWins, int m) {
-    FILE* f = std::fopen("dump_t6.txt", "w");
-    if (!f) return;
-    std::fprintf(f, "rows=%d cols=%d mines=%d\n", b.rows, b.cols, b.totalMines);
-    for (int i = 1; i <= b.rows; ++i) {
-        for (int j = 1; j <= b.cols; ++j)
-            std::fprintf(f, "%s ",
-                         b.board[i][j] == Cell::Hidden
-                             ? "."
-                             : std::to_string(static_cast<int>(b.board[i][j])).c_str());
-        std::fprintf(f, "\n");
-    }
-    std::fprintf(f, "trueMines:");
-    for (int fz : rb.trueMines) std::fprintf(f, " %d", fz);
-    std::fprintf(f, "\nmarks:\n");
-    for (int i = 1; i <= b.rows; ++i) {
-        for (int j = 1; j <= b.cols; ++j)
-            std::fprintf(f, "%d ", static_cast<int>(basic.marks[i][j]));
-        std::fprintf(f, "\n");
-    }
-    std::fprintf(f, "placements(%zu):\n", ps.size());
-    for (const auto& S : ps) {
-        std::fprintf(f, "  {");
-        for (int fz : S) std::fprintf(f, "%d,", fz);
-        std::fprintf(f, "}\n");
-    }
-    std::fprintf(f, "lib total=%d moves=%zu\n", lib.totalPossibilities, lib.result.size());
-    for (int j = 0; j < m; ++j) {
-        const char* cel = "";
-        if (j < static_cast<int>(lib.result.size()))
-            std::fprintf(f, "  move#%d lib(%d,%d,w=%d) naive w=%d\n", j,
-                         lib.result[static_cast<std::size_t>(j)].x,
-                         lib.result[static_cast<std::size_t>(j)].y,
-                         lib.result[static_cast<std::size_t>(j)].wins, naiveWins[j]);
-        else
-            std::fprintf(f, "  move#%d naive w=%d (lib missing) %s\n", j, naiveWins[j], cel);
-    }
-    std::fclose(f);
-}
-
-static bool g_t6Dumped = false;
-
-static void testEndgame(Gen& g, int iter, bool honestProbGrid) {
-    T::section(honestProbGrid ? "T8 Endgame honest-prob-grid (P==1 exclusion)"
-                              : "T6 Endgame naive vs library");
+static void testEndgame(Gen& g, int iter) {
+    T::section("T8 Endgame honest-prob-grid (P==1 exclusion)");
     for (int it = 0; it < iter; ++it) {
         const int rows = 3, cols = 3;
         const int mines = 1 + g.rng.below(3);
@@ -894,7 +994,7 @@ static void testEndgame(Gen& g, int iter, bool honestProbGrid) {
         Distribution::DistPool dpool;
         const auto info = ref::aggregate(rb, ps);
 
-        // 概率网格：honestProbGrid → 真实 per-cell；否则全 0.5（全部隐藏格作候选）
+        // 概率网格：真实 per-cell（候选 = p<1.0 的非必雷格）
         Grid<long double> probGrid(rows, cols, 0.0L);
         std::vector<char> isCandidate(static_cast<std::size_t>(rows * cols), 0);
         for (const auto [i, j] : hidden) {
@@ -902,8 +1002,8 @@ static void testEndgame(Gen& g, int iter, bool honestProbGrid) {
                 ? static_cast<long double>(info.mineCount[static_cast<std::size_t>(rb.flat(i, j))]) /
                       static_cast<long double>(info.total)
                 : 0.0L;
-            probGrid[i][j] = honestProbGrid ? p : 0.5L;
-            const bool cand = !honestProbGrid || p < 1.0L;
+            probGrid[i][j] = p;
+            const bool cand = p < 1.0L;
             isCandidate[static_cast<std::size_t>(rb.flat(i, j))] = cand ? 1 : 0;
         }
 
@@ -975,16 +1075,12 @@ static void testEndgame(Gen& g, int iter, bool honestProbGrid) {
             if (libW != naiW) {
                 sameWins = false;
                 if (T::fails < 30)
-                    std::printf("  [FAIL-%s] move#%d lib=%d naive=%d it=%d (best lib=%d naive=%d)\n",
-                                honestProbGrid ? "T8" : "T6", j, libW, naiW,
+                    std::printf("  [FAIL-T8] move#%d lib=%d naive=%d it=%d (best lib=%d naive=%d)\n",
+                                j, libW, naiW,
                                 it, libBest(lib), naiveBest);
             }
         }
         CHECK(sameWins, "per-move win mismatch it=%d", it);
-        if (!sameWins && !honestProbGrid && !g_t6Dumped) {
-            g_t6Dumped = true;
-            dumpT6(rb, b, basic, ps, lib, naiveWins, nv.m);
-        }
     }
 }
 
@@ -1031,18 +1127,15 @@ int main() {
     std::printf("T1 done\n");
     testBasicUpdater(g, 200);
     std::printf("T2 done\n");
-    // T3（Structure::Updater）已被 repro2 证实存在确定性崩溃 bug（疑似区外 vis/cellHash 残留），
-    // 独立进程复现；这里跳过以免中断整轮 diff 测试。
-    std::printf("T3 skipped (confirmed library bug, see repro2)\n");
+    testStructureUpdate(g, 200);
+    std::printf("T3 done\n");
     testExactAnalyze(g, 500);
     std::printf("T4 done\n");
     testExactObserve(g, 300);
     std::printf("T5 done\n");
     testRadixSort(g, 60);
     std::printf("T7 done\n");
-    testEndgame(g, 120, false);
-    std::printf("T6 done\n");
-    testEndgame(g, 400, true);  // T8 更密集搜索
+    testEndgame(g, 400);  // T8 更密集搜索（诚实概率网格）
     std::printf("T8 done\n");
     std::printf("== done: %d checks, %d fails ==\n", T::checks, T::fails);
     return T::fails == 0 ? 0 : 1;

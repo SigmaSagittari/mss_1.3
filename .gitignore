@@ -3,6 +3,15 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
+# 本项目测试/调试产物（不入库）
+*.exe
+*.log
+dump_t2.txt
+dump_t6.txt
+dump_t3_mismatch.txt
+dumpT3/
+probe_out*.txt
+
 # User-specific files
 *.rsuser
 *.suo
