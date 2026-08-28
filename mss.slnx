@@ -4,4 +4,5 @@
     <Platform Name="Win32" />
   </Configurations>
   <Project Path="mss/mss.vcxproj" Id="9e2a9e3e-33ff-4d1d-9a1e-22ea7649c5b9" />
+  <Project Path="review/harness/harness.vcxproj" Id="6f2ef9d1-8b3a-4f1e-9d7c-2a5b0c4e8f10" />
 </Solution>

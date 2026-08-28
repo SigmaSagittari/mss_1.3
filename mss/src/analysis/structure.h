@@ -358,12 +358,11 @@ inline Structure::Delta Structure::Updater::update(const ObservedBoard& state,
         cellHash.resize(rows, cols, U128{});
         cells.reserve(static_cast<std::size_t>(rows * cols / 2));
     }
-    if (removedFlag.size() < result.components.size()) {
-        removedFlag.resize(result.components.size(), 0);
-    } else {
-        std::fill(removedFlag.begin(),
-                  removedFlag.begin() + result.components.size(), 0);
-    }
+    // 与组件数组平行的临时删标：每次更新开头**整体**清零。
+    // 不能只在 size 增长时 resize(comps,0)（只零新尾部）：上一轮"弹出+追加"后，
+    // 前缀可能残留旧 1——实测（MSVC 语料 it=10）残留 flag 会把从未作废的活组件
+    // 当垃圾删掉，其成员 cellLoc 未被清除，留下脏归属。
+    removedFlag.assign(result.components.size(), 0);
 
     // 标记某格为脏：去重，并记录位置到 dirtyCells。
     auto markDirty = [&](int x, int y) {

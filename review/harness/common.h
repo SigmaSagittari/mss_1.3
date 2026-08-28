@@ -81,13 +81,23 @@ struct Gen {
     explicit Gen(std::uint64_t seed) : rng(seed) {}
 };
 
+// 可移植 Fisher-Yates：std::shuffle 的置换序列在标准里未作规定
+// （libstdc++ 与 MSVC STL 的洗牌结果不同）→ 同一种子跨编译器语料不一致。
+// 手动洗牌锁死语料：同一 seed 在 g++/MSVC/clang 下产出完全相同的盘面。
+inline void shufflePortable(ref::Rng& rng, std::vector<std::pair<int, int>>& v) {
+    for (int i = static_cast<int>(v.size()) - 1; i > 0; --i) {
+        const int j = rng.below(i + 1);
+        std::swap(v[static_cast<std::size_t>(i)], v[static_cast<std::size_t>(j)]);
+    }
+}
+
 inline ref::RefBoard genConsistent(Gen& g, int rows, int cols, int mineCount,
                                    int extraHiddenMax) {
     ref::RefBoard b(rows, cols, mineCount);
     std::vector<std::pair<int, int>> all;
     for (int i = 1; i <= rows; ++i)
         for (int j = 1; j <= cols; ++j) all.emplace_back(i, j);
-    std::shuffle(all.begin(), all.end(), std::mt19937(g.rng.u32()));
+    shufflePortable(g.rng, all);
     std::vector<char> mine(static_cast<std::size_t>(rows * cols), 0);
     for (int k = 0; k < mineCount; ++k) {
         const int f = b.flat(all[k].first, all[k].second);
@@ -99,7 +109,7 @@ inline ref::RefBoard genConsistent(Gen& g, int rows, int cols, int mineCount,
     for (int i = 1; i <= rows; ++i)
         for (int j = 1; j <= cols; ++j)
             if (!mine[static_cast<std::size_t>(b.flat(i, j))]) nonMines.emplace_back(i, j);
-    std::shuffle(nonMines.begin(), nonMines.end(), std::mt19937(g.rng.u32()));
+    shufflePortable(g.rng, nonMines);
     const int extra = std::min(static_cast<int>(nonMines.size()),
                                g.rng.below(extraHiddenMax + 1));
     std::vector<char> extraHide(static_cast<std::size_t>(rows * cols), 0);

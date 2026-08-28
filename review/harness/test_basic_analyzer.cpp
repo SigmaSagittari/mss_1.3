@@ -55,18 +55,23 @@ void testBasicAnalyzer(Gen& g, int iter) {
                 });
                 if (safe) isSafe[static_cast<std::size_t>(rb.flat(i, j))] = 1;
             }
-        // 反解不一致盘面时，一致性校验
+        // 反解不一致盘面时，一致性校验（与库同语义，basic.h step5）：
+        // 对每个数字，去掉「参考已证安全格」后，数字须落在 [确定雷数, 剩余空位] 区间。
+        // 注：上界用 mc+（隐藏-安全）而非 mc+全部隐藏——Safe 由饱和数字推出是 sound 的，
+        // 参考此前用 mc+hc 过松，随机不一致盘面可能放行真正不可能的盘面（实测 it=378）。
         bool refValid = true;
         for (int i = 1; i <= rows && refValid; ++i)
             for (int j = 1; j <= cols; ++j) {
                 const int v = rb.at(i, j);
                 if (v < 0) continue;
-                int mc = 0, hc = 0;
+                int mc = 0, open = 0;
                 ref::forEa(i, j, rows, cols, [&](int ni, int nj) {
-                    if (rb.at(ni, nj) < 0) ++hc;
-                    if (isMine[static_cast<std::size_t>(rb.flat(ni, nj))]) ++mc;
+                    if (rb.at(ni, nj) < 0) {
+                        if (isMine[static_cast<std::size_t>(rb.flat(ni, nj))]) ++mc;
+                        if (!isSafe[static_cast<std::size_t>(rb.flat(ni, nj))]) ++open;
+                    }
                 });
-                if (v < mc || v > mc + hc) refValid = false;
+                if (v < mc || v > mc + open) refValid = false;
             }
         CHECK(res.valid == refValid, "valid flag mismatch it=%d", it);
         if (res.valid) {
