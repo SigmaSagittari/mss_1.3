@@ -1,0 +1,15 @@
+rows=4 cols=4 totalMines=1
+board:
+. 0 0 0 
+1 1 1 0 
+1 0 1 0 
+1 . 1 0 
+trueMines: 9
+updates(1):
+  cell(3,2) -> 0
+marks:
+1 0 0 0 
+0 0 0 0 
+0 0 0 0 
+0 1 0 0 
+sums: u=0 m=2 valid=1

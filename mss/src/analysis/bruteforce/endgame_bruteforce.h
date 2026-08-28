@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "analysis/distribution.h"
-#include "analysis/probability.h"
+#include "analysis/probability/probability.h"
 #include "analysis/probability/exact.h"
 #include "analysis/structure.h"
 #include "core/assert.h"

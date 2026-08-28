@@ -5,7 +5,7 @@
 #include <utility>
 #include <vector>
 
-#include "analysis/basic.h"
+#include "src/analysis/basic.h"
 #include "core/types.h"
 #include "core/utility/flat_hashtable.h"
 #include "core/utility/hash.h"
@@ -262,6 +262,7 @@ inline Structure::Instance Structure::buildComponent(
     tlBoxOfCells.assign(cells.size(), static_cast<BoxId>(-1));
     Shape shape;
 
+    
     for (std::size_t ci = 0; ci < cells.size(); ++ci) {
         const auto [x, y] = cells[ci];
         if (basic.marks[x][y] != Mark::Frontier) continue;
