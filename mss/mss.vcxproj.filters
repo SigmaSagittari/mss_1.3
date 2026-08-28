@@ -1,0 +1,84 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="源文件">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="头文件">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="资源文件">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="头文件\core">
+      <UniqueIdentifier>{a425c4bc-a5db-4944-aafa-6603700fce7d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="头文件\core\utility">
+      <UniqueIdentifier>{7c83ee88-8ae8-4c7d-abe7-23b5aff7d074}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="头文件\analysis">
+      <UniqueIdentifier>{36f8968e-195d-4eaa-b40e-1ffe4ab33b2b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="头文件\analysis\probability">
+      <UniqueIdentifier>{555b011b-a6ca-4bdc-9e14-beb252b62b11}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="头文件\analysis\bruteforce">
+      <UniqueIdentifier>{0bc1c142-2a75-460f-aeea-d162d5a2fc86}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\core\types.h">
+      <Filter>头文件\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\config.h">
+      <Filter>头文件\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\assert.h">
+      <Filter>头文件\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\utility\flat_hashtable.h">
+      <Filter>头文件\core\utility</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\utility\rng.h">
+      <Filter>头文件\core\utility</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\utility\radix_sort.h">
+      <Filter>头文件\core\utility</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\utility\hash.h">
+      <Filter>头文件\core\utility</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\utility\grid.h">
+      <Filter>头文件\core\utility</Filter>
+    </ClInclude>
+    <ClInclude Include="src\analysis\basic.h">
+      <Filter>头文件\analysis</Filter>
+    </ClInclude>
+    <ClInclude Include="src\analysis\distribution.h">
+      <Filter>头文件\analysis</Filter>
+    </ClInclude>
+    <ClInclude Include="src\analysis\structure.h">
+      <Filter>头文件\analysis</Filter>
+    </ClInclude>
+    <ClInclude Include="src\analysis\probability\exact.h">
+      <Filter>头文件\analysis\probability</Filter>
+    </ClInclude>
+    <ClInclude Include="src\analysis\bruteforce\endgame_bruteforce.h">
+      <Filter>头文件\analysis\bruteforce</Filter>
+    </ClInclude>
+    <ClInclude Include="src\analysis\bruteforce\midgame_search.h">
+      <Filter>头文件\analysis\bruteforce</Filter>
+    </ClInclude>
+    <ClInclude Include="src\analysis\probability\probability.h">
+      <Filter>头文件\analysis\probability</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\mss_1.2.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>
