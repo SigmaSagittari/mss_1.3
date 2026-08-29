@@ -1,0 +1,706 @@
+===== move 1 :: hidden=420 revealedNonMine=60 solverKnownMines=0 bombsLeft=99 =====
+[MSG] Thinking...
+tiles left = 420
+mines left = 99
+Witnesses  = 32
+Witnessed  = 40
+Found 17 moves trivially
+[MSG] Found 17 trivial safe moves
+----- solver call end -----
+===== move 2 :: hidden=407 revealedNonMine=73 solverKnownMines=7 bombsLeft=92 =====
+[MSG] Thinking...
+tiles left = 400
+mines left = 92
+Witnesses  = 28
+Witnessed  = 40
+Found 15 moves trivially
+[MSG] Found 15 trivial safe moves
+----- solver call end -----
+===== move 3 :: hidden=392 revealedNonMine=88 solverKnownMines=10 bombsLeft=89 =====
+[MSG] Thinking...
+tiles left = 382
+mines left = 89
+Witnesses  = 32
+Witnessed  = 39
+Found 16 moves trivially
+[MSG] Found 16 trivial safe moves
+----- solver call end -----
+===== move 4 :: hidden=380 revealedNonMine=100 solverKnownMines=17 bombsLeft=82 =====
+[MSG] Thinking...
+tiles left = 363
+mines left = 82
+Witnesses  = 29
+Witnessed  = 33
+Found 14 moves trivially
+[MSG] Found 14 trivial safe moves
+----- solver call end -----
+===== move 5 :: hidden=367 revealedNonMine=113 solverKnownMines=19 bombsLeft=80 =====
+[MSG] Thinking...
+tiles left = 348
+mines left = 80
+Witnesses  = 22
+Witnessed  = 25
+Found 8 moves trivially
+[MSG] Found 8 trivial safe moves
+----- solver call end -----
+===== move 6 :: hidden=338 revealedNonMine=142 solverKnownMines=21 bombsLeft=78 =====
+[MSG] Thinking...
+tiles left = 317
+mines left = 78
+Witnesses  = 30
+Witnessed  = 29
+Found 11 moves trivially
+[MSG] Found 11 trivial safe moves
+----- solver call end -----
+===== move 7 :: hidden=335 revealedNonMine=145 solverKnownMines=29 bombsLeft=70 =====
+[MSG] Thinking...
+tiles left = 306
+mines left = 70
+Witnesses  = 17
+Witnessed  = 22
+Found 9 moves trivially
+[MSG] Found 9 trivial safe moves
+----- solver call end -----
+===== move 8 :: hidden=327 revealedNonMine=153 solverKnownMines=30 bombsLeft=69 =====
+[MSG] Thinking...
+tiles left = 297
+mines left = 69
+Witnesses  = 18
+Witnessed  = 25
+Found 12 moves trivially
+[MSG] Found 12 trivial safe moves
+----- solver call end -----
+===== move 9 :: hidden=302 revealedNonMine=178 solverKnownMines=32 bombsLeft=67 =====
+[MSG] Thinking...
+tiles left = 270
+mines left = 67
+Witnesses  = 29
+Witnessed  = 31
+Found 5 moves trivially
+[MSG] Found 5 trivial safe moves
+----- solver call end -----
+===== move 10 :: hidden=298 revealedNonMine=182 solverKnownMines=33 bombsLeft=66 =====
+[MSG] Thinking...
+tiles left = 265
+mines left = 66
+Witnesses  = 22
+Witnessed  = 28
+Found 6 moves trivially
+[MSG] Found 6 trivial safe moves
+----- solver call end -----
+===== move 11 :: hidden=294 revealedNonMine=186 solverKnownMines=35 bombsLeft=64 =====
+[MSG] Thinking...
+tiles left = 259
+mines left = 64
+Witnesses  = 21
+Witnessed  = 28
+Found 9 moves trivially
+[MSG] Found 9 trivial safe moves
+----- solver call end -----
+===== move 12 :: hidden=275 revealedNonMine=205 solverKnownMines=37 bombsLeft=62 =====
+[MSG] Thinking...
+tiles left = 238
+mines left = 62
+Witnesses  = 28
+Witnessed  = 34
+Found 10 moves trivially
+[MSG] Found 10 trivial safe moves
+----- solver call end -----
+===== move 13 :: hidden=269 revealedNonMine=211 solverKnownMines=41 bombsLeft=58 =====
+[MSG] Thinking...
+tiles left = 228
+mines left = 58
+Witnesses  = 22
+Witnessed  = 29
+Found 8 moves trivially
+[MSG] Found 8 trivial safe moves
+----- solver call end -----
+===== move 14 :: hidden=263 revealedNonMine=217 solverKnownMines=43 bombsLeft=56 =====
+[MSG] Thinking...
+tiles left = 220
+mines left = 56
+Witnesses  = 23
+Witnessed  = 30
+Found 5 moves trivially
+[MSG] Found 5 trivial safe moves
+----- solver call end -----
+===== move 15 :: hidden=259 revealedNonMine=221 solverKnownMines=44 bombsLeft=55 =====
+[MSG] Thinking...
+tiles left = 215
+mines left = 55
+Witnesses  = 21
+Witnessed  = 30
+Found 5 moves trivially
+[MSG] Found 5 trivial safe moves
+----- solver call end -----
+===== move 16 :: hidden=254 revealedNonMine=226 solverKnownMines=44 bombsLeft=55 =====
+[MSG] Thinking...
+tiles left = 210
+mines left = 55
+Witnesses  = 23
+Witnessed  = 32
+Found 9 moves trivially
+[MSG] Found 9 trivial safe moves
+----- solver call end -----
+===== move 17 :: hidden=246 revealedNonMine=234 solverKnownMines=45 bombsLeft=54 =====
+[MSG] Thinking...
+tiles left = 201
+mines left = 54
+Witnesses  = 24
+Witnessed  = 27
+Found 7 moves trivially
+[MSG] Found 7 trivial safe moves
+----- solver call end -----
+===== move 18 :: hidden=241 revealedNonMine=239 solverKnownMines=47 bombsLeft=52 =====
+[MSG] Thinking...
+tiles left = 194
+mines left = 52
+Witnesses  = 23
+Witnessed  = 27
+Found 6 moves trivially
+[MSG] Found 6 trivial safe moves
+----- solver call end -----
+===== move 19 :: hidden=237 revealedNonMine=243 solverKnownMines=49 bombsLeft=50 =====
+[MSG] Thinking...
+tiles left = 188
+mines left = 50
+Witnesses  = 17
+Witnessed  = 23
+Found 2 moves trivially
+[MSG] Found 2 trivial safe moves
+[MSG] Thinking...
+tiles left = 186
+mines left = 48
+Witnesses  = 14
+Witnessed  = 21
+Found 0 moves trivially
+Pruned 0 witnesses as duplicates
+There are 14 Box witnesses
+(15,0) is candidate dead with 1 good boxes and 0 bad boxes
+(16,0) is candidate dead with 1 good boxes and 1 bad boxes
+(17,0) is candidate dead with 2 good boxes and 0 bad boxes
+(17,15) is candidate dead with 2 good boxes and 0 bad boxes
+Ending independent edge
+This is not a complete scan because there are squares off the edge
+Location (16,0) is not dead because a bad box has neither zero or all mines: 2/4
+2 Probability Lines compressed to 2
+Starting a new independent edge
+Ending independent edge
+(19,2) has been determined to be locally a mine
+(19,5) has been determined to be locally a mine
+(19,6) has been determined to be locally clear
+(19,7) has been determined to be locally clear
+(19,8) has been determined to be locally a mine
+(19,9) has been determined to be locally a mine
+(19,10) has been determined to be locally clear
+(18,11) has been determined to be locally a mine
+(19,11) has been determined to be locally clear
+(18,12) has been determined to be locally clear
+(18,13) has been determined to be locally a mine
+(18,14) has been determined to be locally clear
+(17,15) has been determined to be locally clear
+(18,15) has been determined to be locally clear
+The probability engine did a truncated analysis - probability data is not available
+Probability Engine took 1 milliseconds to complete
+[MSG] Found 8 safe tiles. 0 possible solutions remain.
+Checking for unavoidable 50/50 or pseudo 50/50.
+Tile (16,0) is the open end of a chain consisting of 2 tiles
+Tile (18,15) is the open end of a chain consisting of 2 tiles
+Tile (18,14) is the open end of a chain consisting of 2 tiles
+----- solver call end -----
+===== move 20 :: hidden=227 revealedNonMine=253 solverKnownMines=57 bombsLeft=42 =====
+[MSG] Thinking...
+tiles left = 170
+mines left = 42
+Witnesses  = 13
+Witnessed  = 20
+Found 4 moves trivially
+[MSG] Found 4 trivial safe moves
+----- solver call end -----
+===== move 21 :: hidden=224 revealedNonMine=256 solverKnownMines=58 bombsLeft=41 =====
+[MSG] Thinking...
+tiles left = 166
+mines left = 41
+Witnesses  = 14
+Witnessed  = 21
+Found 8 moves trivially
+[MSG] Found 8 trivial safe moves
+----- solver call end -----
+===== move 22 :: hidden=217 revealedNonMine=263 solverKnownMines=59 bombsLeft=40 =====
+[MSG] Thinking...
+tiles left = 158
+mines left = 40
+Witnesses  = 16
+Witnessed  = 23
+Found 0 moves trivially
+Pruned 1 witnesses as duplicates
+There are 16 Box witnesses
+(15,0) is candidate dead with 1 good boxes and 0 bad boxes
+(16,0) is candidate dead with 1 good boxes and 1 bad boxes
+(17,0) is candidate dead with 2 good boxes and 0 bad boxes
+Ending independent edge
+This is not a complete scan because there are squares off the edge
+Location (16,0) is not dead because a bad box has neither zero or all mines: 2/4
+2 Probability Lines compressed to 2
+Starting a new independent edge
+Ending independent edge
+This is not a complete scan because there are squares off the edge
+2 Probability Lines compressed to 2
+Starting a new independent edge
+Ending independent edge
+(20,4) has been determined to be locally clear
+(21,4) has been determined to be locally clear
+(22,4) has been determined to be locally clear
+(22,5) has been determined to be locally clear
+(22,6) has been determined to be locally a mine
+(22,7) has been determined to be locally clear
+(22,8) has been determined to be locally a mine
+(22,9) has been determined to be locally clear
+(20,10) has been determined to be locally a mine
+(21,10) has been determined to be locally clear
+(22,10) has been determined to be locally clear
+(20,11) has been determined to be locally clear
+(20,12) has been determined to be locally clear
+(20,13) has been determined to be locally a mine
+The probability engine did a truncated analysis - probability data is not available
+Probability Engine took 0 milliseconds to complete
+[MSG] Found 10 safe tiles. 0 possible solutions remain.
+Checking for unavoidable 50/50 or pseudo 50/50.
+Tile (16,0) is the open end of a chain consisting of 2 tiles
+Tile (19,1) is the open end of a chain consisting of 3 tiles
+Tile (20,14) is the open end of a chain consisting of 2 tiles
+----- solver call end -----
+===== move 23 :: hidden=207 revealedNonMine=273 solverKnownMines=63 bombsLeft=36 =====
+[MSG] Thinking...
+tiles left = 144
+mines left = 36
+Witnesses  = 17
+Witnessed  = 25
+Found 5 moves trivially
+[MSG] Found 5 trivial safe moves
+----- solver call end -----
+===== move 24 :: hidden=202 revealedNonMine=278 solverKnownMines=63 bombsLeft=36 =====
+[MSG] Thinking...
+tiles left = 139
+mines left = 36
+Witnesses  = 20
+Witnessed  = 27
+Found 5 moves trivially
+[MSG] Found 5 trivial safe moves
+----- solver call end -----
+===== move 25 :: hidden=181 revealedNonMine=299 solverKnownMines=63 bombsLeft=36 =====
+[MSG] Thinking...
+tiles left = 118
+mines left = 36
+Witnesses  = 32
+Witnessed  = 38
+Found 4 moves trivially
+[MSG] Found 4 trivial safe moves
+----- solver call end -----
+===== move 26 :: hidden=180 revealedNonMine=300 solverKnownMines=66 bombsLeft=33 =====
+[MSG] Thinking...
+tiles left = 114
+mines left = 33
+Witnesses  = 27
+Witnessed  = 37
+Found 0 moves trivially
+Pruned 2 witnesses as duplicates
+There are 27 Box witnesses
+(15,0) is candidate dead with 1 good boxes and 0 bad boxes
+(16,0) is candidate dead with 1 good boxes and 1 bad boxes
+(17,0) is candidate dead with 2 good boxes and 0 bad boxes
+(19,4) is candidate dead with 2 good boxes and 0 bad boxes
+(29,4) is candidate dead with 3 good boxes and 0 bad boxes
+(29,5) is candidate dead with 2 good boxes and 0 bad boxes
+(29,6) is candidate dead with 2 good boxes and 0 bad boxes
+(29,7) is candidate dead with 1 good boxes and 1 bad boxes
+(29,8) is candidate dead with 2 good boxes and 0 bad boxes
+Ending independent edge
+This is not a complete scan because there are squares off the edge
+Location (16,0) is not dead because a bad box has neither zero or all mines: 2/4
+2 Probability Lines compressed to 2
+Starting a new independent edge
+Ending independent edge
+(22,3) has been determined to be locally a mine
+(25,3) has been determined to be locally clear
+(28,3) has been determined to be locally clear
+(25,9) has been determined to be locally clear
+(23,11) has been determined to be locally clear
+(21,13) has been determined to be locally clear
+The probability engine did a truncated analysis - probability data is not available
+Probability Engine took 0 milliseconds to complete
+[MSG] Found 5 safe tiles. 0 possible solutions remain.
+Checking for unavoidable 50/50 or pseudo 50/50.
+Tile (16,0) is the open end of a chain consisting of 2 tiles
+Tile (19,1) is the open end of a chain consisting of 3 tiles
+Tile (20,14) is the open end of a chain consisting of 2 tiles
+----- solver call end -----
+===== move 27 :: hidden=175 revealedNonMine=305 solverKnownMines=67 bombsLeft=32 =====
+[MSG] Thinking...
+tiles left = 108
+mines left = 32
+Witnesses  = 32
+Witnessed  = 47
+Found 0 moves trivially
+Pruned 6 witnesses as duplicates
+There are 32 Box witnesses
+(15,0) is candidate dead with 1 good boxes and 0 bad boxes
+(16,0) is candidate dead with 1 good boxes and 1 bad boxes
+(17,0) is candidate dead with 2 good boxes and 0 bad boxes
+(19,4) is candidate dead with 2 good boxes and 0 bad boxes
+(26,3) is candidate dead with 1 good boxes and 2 bad boxes
+(27,3) is candidate dead with 1 good boxes and 2 bad boxes
+(29,3) is candidate dead with 1 good boxes and 1 bad boxes
+(29,4) is candidate dead with 2 good boxes and 0 bad boxes
+(29,5) is candidate dead with 2 good boxes and 0 bad boxes
+(29,6) is candidate dead with 2 good boxes and 0 bad boxes
+(29,7) is candidate dead with 1 good boxes and 1 bad boxes
+(23,9) is candidate dead with 3 good boxes and 0 bad boxes
+(24,9) is candidate dead with 3 good boxes and 1 bad boxes
+(29,8) is candidate dead with 2 good boxes and 0 bad boxes
+(23,10) is candidate dead with 4 good boxes and 1 bad boxes
+(21,11) is candidate dead with 3 good boxes and 0 bad boxes
+(22,11) is candidate dead with 4 good boxes and 1 bad boxes
+(21,12) is candidate dead with 3 good boxes and 1 bad boxes
+Ending independent edge
+This is not a complete scan because there are squares off the edge
+Location (16,0) is not dead because a bad box has neither zero or all mines: 2/4
+2 Probability Lines compressed to 2
+Starting a new independent edge
+Ending independent edge
+(24,10) has been determined to be locally clear
+(25,10) has been determined to be locally clear
+(26,10) has been determined to be locally clear
+The probability engine did a truncated analysis - probability data is not available
+Probability Engine took 0 milliseconds to complete
+[MSG] Found 3 safe tiles. 0 possible solutions remain.
+Checking for unavoidable 50/50 or pseudo 50/50.
+Tile (16,0) is the open end of a chain consisting of 2 tiles
+Tile (19,1) is the open end of a chain consisting of 3 tiles
+Tile (20,14) is the open end of a chain consisting of 2 tiles
+----- solver call end -----
+===== move 28 :: hidden=172 revealedNonMine=308 solverKnownMines=67 bombsLeft=32 =====
+[MSG] Thinking...
+tiles left = 105
+mines left = 32
+Witnesses  = 35
+Witnessed  = 48
+Found 0 moves trivially
+Pruned 7 witnesses as duplicates
+There are 35 Box witnesses
+(15,0) is candidate dead with 1 good boxes and 0 bad boxes
+(16,0) is candidate dead with 1 good boxes and 1 bad boxes
+(17,0) is candidate dead with 2 good boxes and 0 bad boxes
+(19,4) is candidate dead with 2 good boxes and 0 bad boxes
+(26,3) is candidate dead with 1 good boxes and 2 bad boxes
+(27,3) is candidate dead with 1 good boxes and 2 bad boxes
+(29,3) is candidate dead with 1 good boxes and 1 bad boxes
+(29,4) is candidate dead with 2 good boxes and 0 bad boxes
+(29,5) is candidate dead with 2 good boxes and 0 bad boxes
+(29,6) is candidate dead with 2 good boxes and 0 bad boxes
+(29,7) is candidate dead with 1 good boxes and 1 bad boxes
+(23,9) is candidate dead with 2 good boxes and 0 bad boxes
+(24,9) is candidate dead with 2 good boxes and 0 bad boxes
+(26,9) is candidate dead with 1 good boxes and 1 bad boxes
+(29,8) is candidate dead with 2 good boxes and 0 bad boxes
+(23,10) is candidate dead with 4 good boxes and 0 bad boxes
+(21,11) is candidate dead with 3 good boxes and 0 bad boxes
+(22,11) is candidate dead with 4 good boxes and 1 bad boxes
+(21,12) is candidate dead with 3 good boxes and 1 bad boxes
+Ending independent edge
+This is not a complete scan because there are squares off the edge
+Location (16,0) is not dead because a bad box has neither zero or all mines: 2/4
+2 Probability Lines compressed to 2
+Starting a new independent edge
+Ending independent edge
+(23,9) has been determined to be locally clear
+(24,9) has been determined to be locally a mine
+(26,9) has been determined to be locally clear
+(27,9) has been determined to be locally a mine
+(23,10) has been determined to be locally a mine
+(21,11) has been determined to be locally a mine
+(22,11) has been determined to be locally clear
+(24,11) has been determined to be locally clear
+(25,11) has been determined to be locally clear
+(26,11) has been determined to be locally clear
+(27,10) has been determined to be locally clear
+(27,11) has been determined to be locally clear
+(21,12) has been determined to be locally clear
+(22,12) has been determined to be locally clear
+(23,12) has been determined to be locally clear
+(24,12) has been determined to be locally clear
+The probability engine did a truncated analysis - probability data is not available
+Probability Engine took 1 milliseconds to complete
+[MSG] Found 12 safe tiles. 0 possible solutions remain.
+Checking for unavoidable 50/50 or pseudo 50/50.
+Tile (16,0) is the open end of a chain consisting of 2 tiles
+Tile (19,1) is the open end of a chain consisting of 3 tiles
+Tile (20,14) is the open end of a chain consisting of 2 tiles
+----- solver call end -----
+===== move 29 :: hidden=157 revealedNonMine=323 solverKnownMines=71 bombsLeft=28 =====
+[MSG] Thinking...
+tiles left = 86
+mines left = 28
+Witnesses  = 30
+Witnessed  = 41
+Found 1 moves trivially
+[MSG] Found 1 trivial safe moves
+----- solver call end -----
+===== move 30 :: hidden=156 revealedNonMine=324 solverKnownMines=71 bombsLeft=28 =====
+[MSG] Thinking...
+tiles left = 85
+mines left = 28
+Witnesses  = 30
+Witnessed  = 41
+Found 6 moves trivially
+[MSG] Found 6 trivial safe moves
+----- solver call end -----
+===== move 31 :: hidden=151 revealedNonMine=329 solverKnownMines=72 bombsLeft=27 =====
+[MSG] Thinking...
+tiles left = 79
+mines left = 27
+Witnesses  = 31
+Witnessed  = 42
+Found 9 moves trivially
+[MSG] Found 9 trivial safe moves
+----- solver call end -----
+===== move 32 :: hidden=144 revealedNonMine=336 solverKnownMines=74 bombsLeft=25 =====
+[MSG] Thinking...
+tiles left = 70
+mines left = 25
+Witnesses  = 28
+Witnessed  = 38
+Found 6 moves trivially
+[MSG] Found 6 trivial safe moves
+----- solver call end -----
+===== move 33 :: hidden=135 revealedNonMine=345 solverKnownMines=75 bombsLeft=24 =====
+[MSG] Thinking...
+tiles left = 60
+mines left = 24
+Witnesses  = 25
+Witnessed  = 32
+Found 2 moves trivially
+[MSG] Found 2 trivial safe moves
+----- solver call end -----
+===== move 34 :: hidden=134 revealedNonMine=346 solverKnownMines=76 bombsLeft=23 =====
+[MSG] Thinking...
+tiles left = 58
+mines left = 23
+Witnesses  = 23
+Witnessed  = 31
+Found 3 moves trivially
+[MSG] Found 3 trivial safe moves
+----- solver call end -----
+===== move 35 :: hidden=131 revealedNonMine=349 solverKnownMines=76 bombsLeft=23 =====
+[MSG] Thinking...
+tiles left = 55
+mines left = 23
+Witnesses  = 23
+Witnessed  = 30
+Found 4 moves trivially
+[MSG] Found 4 trivial safe moves
+[MSG] Thinking...
+tiles left = 51
+mines left = 19
+Witnesses  = 18
+Witnessed  = 26
+Found 0 moves trivially
+Pruned 3 witnesses as duplicates
+There are 18 Box witnesses
+(15,0) is candidate dead with 1 good boxes and 0 bad boxes
+(16,0) is candidate dead with 1 good boxes and 1 bad boxes
+(17,0) is candidate dead with 2 good boxes and 0 bad boxes
+(19,4) is candidate dead with 2 good boxes and 0 bad boxes
+(26,3) is candidate dead with 1 good boxes and 2 bad boxes
+(27,3) is candidate dead with 1 good boxes and 2 bad boxes
+(29,3) is candidate dead with 1 good boxes and 1 bad boxes
+(29,4) is candidate dead with 2 good boxes and 0 bad boxes
+(29,5) is candidate dead with 2 good boxes and 0 bad boxes
+(29,6) is candidate dead with 2 good boxes and 0 bad boxes
+(29,7) is candidate dead with 1 good boxes and 1 bad boxes
+(29,8) is candidate dead with 2 good boxes and 0 bad boxes
+(29,9) is candidate dead with 1 good boxes and 0 bad boxes
+Ending independent edge
+This is not a complete scan because there are squares off the edge
+Location (16,0) is not dead because a bad box has neither zero or all mines: 2/4
+2 Probability Lines compressed to 2
+Starting a new independent edge
+Ending independent edge
+This is not a complete scan because there are squares off the edge
+Location (19,4) is not dead because the sum of mines in good boxes is not constant. Was 1 now 2. Mines in probability line 9
+Location (26,3) is not dead because a bad box has neither zero or all mines: 6/18
+Location (27,3) is not dead because a bad box has neither zero or all mines: 3/9
+Location (29,3) is not dead because a bad box has neither zero or all mines: 9/27
+Location (29,4) is not dead because the sum of mines in good boxes is not constant. Was 2 now 1. Mines in probability line 9
+Location (29,7) is not dead because the sum of mines in good boxes is not constant. Was 0 now 1. Mines in probability line 9
+20 Probability Lines compressed to 4
+26150080 solutions with 9 mines on Perimeter
+104191725 solutions with 10 mines on Perimeter
+127625850 solutions with 11 mines on Perimeter
+56241900 solutions with 12 mines on Perimeter
+7438200 solutions with 13 mines on Perimeter
+PE found (15,0) to be dead with value +1
+PE found (17,0) to be dead with value +1
+PE found (29,5) to be dead with value +1
+PE found (29,6) to be dead with value +1
+PE found (29,8) to be dead with value +2
+PE found (29,9) to be dead with value +1
+Safe tiles 0, Mines found 0
+Off edge Safety is 0.66938298
+Best on edge safety is 0.86860269
+Best safety is 0.86860269
+Best living safety is 0.86860269
+Blended safety is 0.86860269
+Game has  321647755 candidate solutions
+The probability engine did a full analysis - probability data is available
+Probability Engine took 0 milliseconds to complete
+Checking for 2-tile 50/50 influence
+Possible 50/50 - (29,8) (29,9) chance of being 50/50 52.068%
+Checking for 4-tile 50/50 influence
+Checking for unavoidable 50/50 or pseudo 50/50.
+Tile (16,0) is the open end of a chain consisting of 2 tiles
+Tile (19,1) is the open end of a chain consisting of 3 tiles
+Best probability is 0.86860269 freshhold is 0.781742421
+Tile (29,6) is ignored because it is dead
+Tile (15,0) is dead
+Tile (17,0) is dead
+Tile (29,5) is dead
+Tile (29,6) is dead
+Tile (29,8) is dead
+Tile (29,9) is dead
+
+-------- Starting Best Guess Analysis --------
+---- Tiles with long term risk ----
+- None found
+
+-------- Tile (27,2) --------
+Tile (27,2) has 0 linked living tiles and dominated=false
+Tile (27,2) with value 1 Probability 0.125507 ==> Safest 1, Blended safety 1, Single safest tile: none, living clears 5
+Tile (27,2) with value 2 Probability 0.321046 ==> Safest 0.91928126, Blended safety 0.90135928, Single safest tile: (28,2), living clears 0
+Tile (27,2) with value 3 Probability 0.289258 ==> Safest 0.86561612, Blended safety 0.8546835460000001, Single safest tile: none, living clears 0
+Tile (27,2) with value 4 Probability 0.113099 ==> Safest 0.90339878, Blended safety 0.87727959, Single safest tile: none, living clears 0
+Tile (27,2) with value 5 Probability 0.018688 ==> Safest 0.94637822, Blended safety 0.9183888259999999, Single safest tile: none, living clears 0
+Tile (27,2) with value 6 Probability 0.001002 ==> Safest 1, Blended safety 1, Single safest tile: none, living clears 2
+Tile (27,2), secondary safety = 0.7918863738314998, 50/50 influence = 1, blended safety = 0.7794931392854458, progress = 0.126509, expected clears = 0.629541, always clear = 0, final score = 0.7795917521830037
+Tile (27,2) is now the best with score 0.7795917521830037
+
+-------- Tile (28,2) --------
+Tile (28,2) has 0 linked living tiles and dominated=false
+Tile (28,2) highest impact 4-tile 50/50 has blast percentage 0.573%
+Tile (28,2) with value 1 Probability 0.136178 ==> Safest 1, Blended safety 1, Single safest tile: none, living clears 5
+Tile (28,2) with value 2 Probability 0.351115 ==> Safest 0.88422576, Blended safety 0.88422576, Single safest tile: none, living clears 0
+Tile (28,2) with value 3 Probability 0.286359 ==> Safest 0.78487553, Blended safety 0.78487553, Single safest tile: none, living clears 0
+Tile (28,2) is being pruned,  50/50 influence = 1.0059454, max score possible is 0.7710842241613087
+
+-------- Tile (29,2) --------
+Tile (29,2) has 0 linked living tiles and dominated=false
+Tile (29,2) highest impact 4-tile 50/50 has blast percentage 0.573%
+Tile (29,2) with value 0 Probability 0.176424 ==> Safest 1, Blended safety 1, Single safest tile: none, living clears 5
+Tile (29,2) with value 1 Probability 0.37573 ==> Safest 0.89558888, Blended safety 0.884499426, Single safest tile: (28,2), living clears 0
+Tile (29,2) with value 2 Probability 0.252241 ==> Safest 0.88843188, Blended safety 0.863121528, Single safest tile: none, living clears 0
+Tile (29,2) with value 3 Probability 0.060245 ==> Safest 0.93424901, Blended safety 0.902767916, Single safest tile: none, living clears 0
+Tile (29,2) with value 4 Probability 0.003961 ==> Safest 1, Blended safety 1, Single safest tile: none, living clears 2
+Tile (29,2), secondary safety = 0.79726738733293, 50/50 influence = 1.0059454, blended safety = 0.7894859277689523, progress = 0.180385, expected clears = 0.890046, always clear = 0, final score = 0.7896283391880329
+Tile (29,2) is now the best with score 0.7896283391880329
+
+Solver recommends tile (29,2)
+Best Guess analysis took 4 milliseconds to complete
+[MSG] Guessing heuristic suggests clearing tile (29,2). 321,647,755 possible solutions remain.
+----- solver call end -----
+===== move 36 :: hidden=130 revealedNonMine=350 solverKnownMines=80 bombsLeft=19 =====
+[MSG] Thinking...
+tiles left = 50
+mines left = 19
+Witnesses  = 19
+Witnessed  = 27
+Found 0 moves trivially
+Pruned 3 witnesses as duplicates
+There are 19 Box witnesses
+(15,0) is candidate dead with 1 good boxes and 0 bad boxes
+(16,0) is candidate dead with 1 good boxes and 1 bad boxes
+(17,0) is candidate dead with 2 good boxes and 0 bad boxes
+(29,3) is candidate dead with 2 good boxes and 0 bad boxes
+(19,4) is candidate dead with 2 good boxes and 0 bad boxes
+(26,3) is candidate dead with 2 good boxes and 1 bad boxes
+(27,3) is candidate dead with 3 good boxes and 1 bad boxes
+(29,4) is candidate dead with 2 good boxes and 0 bad boxes
+(29,5) is candidate dead with 2 good boxes and 0 bad boxes
+(29,6) is candidate dead with 2 good boxes and 0 bad boxes
+(29,7) is candidate dead with 1 good boxes and 1 bad boxes
+(29,8) is candidate dead with 2 good boxes and 0 bad boxes
+(29,9) is candidate dead with 1 good boxes and 0 bad boxes
+Ending independent edge
+This is not a complete scan because there are squares off the edge
+Location (16,0) is not dead because a bad box has neither zero or all mines: 2/4
+2 Probability Lines compressed to 2
+Starting a new independent edge
+Ending independent edge
+This is not a complete scan because there are squares off the edge
+Location (29,3) is not dead because the sum of mines in good boxes is not constant. Was 1 now 0. Mines in probability line 10
+Location (19,4) is not dead because the sum of mines in good boxes is not constant. Was 1 now 2. Mines in probability line 10
+Location (26,3) is not dead because a bad box has neither zero or all mines: 3/9
+Location (27,3) is not dead because the sum of mines in good boxes is not constant. Was 2 now 1. Mines in probability line 8
+Location (29,4) is not dead because the sum of mines in good boxes is not constant. Was 2 now 1. Mines in probability line 9
+Location (29,7) is not dead because the sum of mines in good boxes is not constant. Was 0 now 1. Mines in probability line 9
+24 Probability Lines compressed to 5
+2288132 solutions with 9 mines on Perimeter
+25332890 solutions with 10 mines on Perimeter
+51973284 solutions with 11 mines on Perimeter
+33586509 solutions with 12 mines on Perimeter
+7268184 solutions with 13 mines on Perimeter
+403788 solutions with 14 mines on Perimeter
+PE found (15,0) to be dead with value +1
+PE found (17,0) to be dead with value +1
+PE found (29,5) to be dead with value +1
+PE found (29,6) to be dead with value +1
+PE found (29,8) to be dead with value +2
+PE found (29,9) to be dead with value +1
+Safe tiles 0, Mines found 0
+Off edge Safety is 0.65916233
+Best on edge safety is 0.89558888
+Best safety is 0.89558888
+Best living safety is 0.89558888
+Blended safety is 0.884499426
+Game has  120852787 candidate solutions
+The probability engine did a full analysis - probability data is available
+Probability Engine took 0 milliseconds to complete
+Checking for 2-tile 50/50 influence
+Possible 50/50 - (29,8) (29,9) chance of being 50/50 63.130%
+Checking for 4-tile 50/50 influence
+Checking for unavoidable 50/50 or pseudo 50/50.
+Tile (16,0) is the open end of a chain consisting of 2 tiles
+Tile (19,1) is the open end of a chain consisting of 3 tiles
+Tile (28,1) is the open end of a chain consisting of 2 tiles
+Best probability is 0.89558888 freshhold is 0.806029992
+Tile (29,6) is ignored because it is dead
+Tile (15,0) is dead
+Tile (17,0) is dead
+Tile (29,5) is dead
+Tile (29,6) is dead
+Tile (29,8) is dead
+Tile (29,9) is dead
+
+-------- Starting Best Guess Analysis --------
+---- Tiles with long term risk ----
+- None found
+
+-------- Tile (28,2) --------
+Tile (28,2) has 0 linked living tiles and dominated=false
+Tile (28,2) with value 1 Probability 0.135237 ==> Safest 1, Blended safety 1, Single safest tile: none, living clears 5
+Tile (28,2) with value 2 Probability 0.462511 ==> Safest 0.91520468, Blended safety 0.898245616, Single safest tile: (27,2), living clears 0
+Tile (28,2) with value 3 Probability 0.267292 ==> Safest 0.928125, Blended safety 0.901607144, Single safest tile: none, living clears 0
+Tile (28,2) with value 4 Probability 0.030547 ==> Safest 1, Blended safety 0.95625, Single safest tile: none, living clears 1
+Tile (28,2), secondary safety = 0.83715661925148, 50/50 influence = 1, blended safety = 0.820888423585824, progress = 0.165784, expected clears = 0.706734, always clear = 0, final score = 0.8210245137522398
+Tile (28,2) is now the best with score 0.8210245137522398
+
+-------- Tile (27,2) --------
+Tile (27,2) has 0 linked living tiles and dominated=false
+Tile (27,2) with value 1 Probability 0.137648 ==> Safest 1, Blended safety 1, Single safest tile: none, living clears 5
+Tile (27,2) with value 2 Probability 0.315573 ==> Safest 0.92304826, Blended safety 0.907657912, Single safest tile: (28,2), living clears 0
+Tile (27,2) is being pruned,  50/50 influence = 1, max score possible is 0.8114263658995188
+
+Solver recommends tile (28,2)
+Best Guess analysis took 1 milliseconds to complete
+[MSG] Guessing heuristic suggests clearing tile (28,2). 120,852,787 possible solutions remain.
+----- solver call end -----
+!! MOVE 36 BLEW UP on (28,2) (prob 0.89558888)

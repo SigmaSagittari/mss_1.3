@@ -1,0 +1,424 @@
+===== move 1 :: hidden=462 revealedNonMine=18 solverKnownMines=0 bombsLeft=99 =====
+[MSG] Thinking...
+tiles left = 462
+mines left = 99
+Witnesses  = 13
+Witnessed  = 17
+Found 1 moves trivially
+[MSG] Found 1 trivial safe moves
+[MSG] Thinking...
+tiles left = 461
+mines left = 98
+Witnesses  = 12
+Witnessed  = 16
+Found 1 moves trivially
+[MSG] Found 1 trivial safe moves
+----- solver call end -----
+===== move 2 :: hidden=461 revealedNonMine=19 solverKnownMines=1 bombsLeft=98 =====
+[MSG] Thinking...
+tiles left = 460
+mines left = 98
+Witnesses  = 11
+Witnessed  = 16
+Found 2 moves trivially
+[MSG] Found 2 trivial safe moves
+----- solver call end -----
+===== move 3 :: hidden=459 revealedNonMine=21 solverKnownMines=1 bombsLeft=98 =====
+[MSG] Thinking...
+tiles left = 458
+mines left = 98
+Witnesses  = 11
+Witnessed  = 14
+Found 3 moves trivially
+[MSG] Found 3 trivial safe moves
+----- solver call end -----
+===== move 4 :: hidden=445 revealedNonMine=35 solverKnownMines=2 bombsLeft=97 =====
+[MSG] Thinking...
+tiles left = 443
+mines left = 97
+Witnesses  = 15
+Witnessed  = 17
+Found 6 moves trivially
+[MSG] Found 6 trivial safe moves
+----- solver call end -----
+===== move 5 :: hidden=442 revealedNonMine=38 solverKnownMines=5 bombsLeft=94 =====
+[MSG] Thinking...
+tiles left = 437
+mines left = 94
+Witnesses  = 12
+Witnessed  = 17
+Found 9 moves trivially
+[MSG] Found 9 trivial safe moves
+----- solver call end -----
+===== move 6 :: hidden=435 revealedNonMine=45 solverKnownMines=7 bombsLeft=92 =====
+[MSG] Thinking...
+tiles left = 428
+mines left = 92
+Witnesses  = 14
+Witnessed  = 20
+Found 8 moves trivially
+[MSG] Found 8 trivial safe moves
+----- solver call end -----
+===== move 7 :: hidden=405 revealedNonMine=75 solverKnownMines=8 bombsLeft=91 =====
+[MSG] Thinking...
+tiles left = 397
+mines left = 91
+Witnesses  = 27
+Witnessed  = 28
+Found 14 moves trivially
+[MSG] Found 14 trivial safe moves
+----- solver call end -----
+===== move 8 :: hidden=394 revealedNonMine=86 solverKnownMines=11 bombsLeft=88 =====
+[MSG] Thinking...
+tiles left = 383
+mines left = 88
+Witnesses  = 26
+Witnessed  = 31
+Found 11 moves trivially
+[MSG] Found 11 trivial safe moves
+----- solver call end -----
+===== move 9 :: hidden=388 revealedNonMine=92 solverKnownMines=16 bombsLeft=83 =====
+[MSG] Thinking...
+tiles left = 372
+mines left = 83
+Witnesses  = 19
+Witnessed  = 28
+Found 7 moves trivially
+[MSG] Found 7 trivial safe moves
+----- solver call end -----
+===== move 10 :: hidden=384 revealedNonMine=96 solverKnownMines=19 bombsLeft=80 =====
+[MSG] Thinking...
+tiles left = 365
+mines left = 80
+Witnesses  = 18
+Witnessed  = 28
+Found 6 moves trivially
+[MSG] Found 6 trivial safe moves
+----- solver call end -----
+===== move 11 :: hidden=379 revealedNonMine=101 solverKnownMines=20 bombsLeft=79 =====
+[MSG] Thinking...
+tiles left = 359
+mines left = 79
+Witnesses  = 20
+Witnessed  = 31
+Found 5 moves trivially
+[MSG] Found 5 trivial safe moves
+----- solver call end -----
+===== move 12 :: hidden=371 revealedNonMine=109 solverKnownMines=21 bombsLeft=78 =====
+[MSG] Thinking...
+tiles left = 350
+mines left = 78
+Witnesses  = 21
+Witnessed  = 28
+Found 2 moves trivially
+[MSG] Found 2 trivial safe moves
+----- solver call end -----
+===== move 13 :: hidden=370 revealedNonMine=110 solverKnownMines=22 bombsLeft=77 =====
+[MSG] Thinking...
+tiles left = 348
+mines left = 77
+Witnesses  = 20
+Witnessed  = 27
+Found 5 moves trivially
+[MSG] Found 5 trivial safe moves
+----- solver call end -----
+===== move 14 :: hidden=367 revealedNonMine=113 solverKnownMines=24 bombsLeft=75 =====
+[MSG] Thinking...
+tiles left = 343
+mines left = 75
+Witnesses  = 21
+Witnessed  = 28
+Found 6 moves trivially
+[MSG] Found 6 trivial safe moves
+----- solver call end -----
+===== move 15 :: hidden=362 revealedNonMine=118 solverKnownMines=25 bombsLeft=74 =====
+[MSG] Thinking...
+tiles left = 337
+mines left = 74
+Witnesses  = 22
+Witnessed  = 30
+Found 10 moves trivially
+[MSG] Found 10 trivial safe moves
+----- solver call end -----
+===== move 16 :: hidden=357 revealedNonMine=123 solverKnownMines=30 bombsLeft=69 =====
+[MSG] Thinking...
+tiles left = 327
+mines left = 69
+Witnesses  = 20
+Witnessed  = 28
+Found 7 moves trivially
+[MSG] Found 7 trivial safe moves
+----- solver call end -----
+===== move 17 :: hidden=350 revealedNonMine=130 solverKnownMines=30 bombsLeft=69 =====
+[MSG] Thinking...
+tiles left = 320
+mines left = 69
+Witnesses  = 22
+Witnessed  = 29
+Found 4 moves trivially
+[MSG] Found 4 trivial safe moves
+----- solver call end -----
+===== move 18 :: hidden=348 revealedNonMine=132 solverKnownMines=32 bombsLeft=67 =====
+[MSG] Thinking...
+tiles left = 316
+mines left = 67
+Witnesses  = 20
+Witnessed  = 28
+Found 6 moves trivially
+[MSG] Found 6 trivial safe moves
+----- solver call end -----
+===== move 19 :: hidden=344 revealedNonMine=136 solverKnownMines=34 bombsLeft=65 =====
+[MSG] Thinking...
+tiles left = 310
+mines left = 65
+Witnesses  = 19
+Witnessed  = 28
+Found 7 moves trivially
+[MSG] Found 7 trivial safe moves
+----- solver call end -----
+===== move 20 :: hidden=334 revealedNonMine=146 solverKnownMines=34 bombsLeft=65 =====
+[MSG] Thinking...
+tiles left = 300
+mines left = 65
+Witnesses  = 26
+Witnessed  = 33
+Found 5 moves trivially
+[MSG] Found 5 trivial safe moves
+----- solver call end -----
+===== move 21 :: hidden=331 revealedNonMine=149 solverKnownMines=36 bombsLeft=63 =====
+[MSG] Thinking...
+tiles left = 295
+mines left = 63
+Witnesses  = 25
+Witnessed  = 32
+Found 8 moves trivially
+[MSG] Found 8 trivial safe moves
+----- solver call end -----
+===== move 22 :: hidden=321 revealedNonMine=159 solverKnownMines=37 bombsLeft=62 =====
+[MSG] Thinking...
+tiles left = 284
+mines left = 62
+Witnesses  = 27
+Witnessed  = 31
+Found 7 moves trivially
+[MSG] Found 7 trivial safe moves
+----- solver call end -----
+===== move 23 :: hidden=314 revealedNonMine=166 solverKnownMines=39 bombsLeft=60 =====
+[MSG] Thinking...
+tiles left = 275
+mines left = 60
+Witnesses  = 21
+Witnessed  = 26
+Found 2 moves trivially
+[MSG] Found 2 trivial safe moves
+----- solver call end -----
+===== move 24 :: hidden=312 revealedNonMine=168 solverKnownMines=39 bombsLeft=60 =====
+[MSG] Thinking...
+tiles left = 273
+mines left = 60
+Witnesses  = 21
+Witnessed  = 26
+Found 2 moves trivially
+[MSG] Found 2 trivial safe moves
+----- solver call end -----
+===== move 25 :: hidden=311 revealedNonMine=169 solverKnownMines=40 bombsLeft=59 =====
+[MSG] Thinking...
+tiles left = 271
+mines left = 59
+Witnesses  = 20
+Witnessed  = 26
+Found 5 moves trivially
+[MSG] Found 5 trivial safe moves
+----- solver call end -----
+===== move 26 :: hidden=296 revealedNonMine=184 solverKnownMines=40 bombsLeft=59 =====
+[MSG] Thinking...
+tiles left = 256
+mines left = 59
+Witnesses  = 28
+Witnessed  = 29
+Found 10 moves trivially
+[MSG] Found 10 trivial safe moves
+----- solver call end -----
+===== move 27 :: hidden=289 revealedNonMine=191 solverKnownMines=43 bombsLeft=56 =====
+[MSG] Thinking...
+tiles left = 246
+mines left = 56
+Witnesses  = 26
+Witnessed  = 28
+Found 13 moves trivially
+[MSG] Found 13 trivial safe moves
+----- solver call end -----
+===== move 28 :: hidden=280 revealedNonMine=200 solverKnownMines=47 bombsLeft=52 =====
+[MSG] Thinking...
+tiles left = 233
+mines left = 52
+Witnesses  = 24
+Witnessed  = 29
+Found 12 moves trivially
+[MSG] Found 12 trivial safe moves
+----- solver call end -----
+===== move 29 :: hidden=266 revealedNonMine=214 solverKnownMines=49 bombsLeft=50 =====
+[MSG] Thinking...
+tiles left = 217
+mines left = 50
+Witnesses  = 24
+Witnessed  = 31
+Found 11 moves trivially
+[MSG] Found 11 trivial safe moves
+----- solver call end -----
+===== move 30 :: hidden=250 revealedNonMine=230 solverKnownMines=50 bombsLeft=49 =====
+[MSG] Thinking...
+tiles left = 200
+mines left = 49
+Witnesses  = 30
+Witnessed  = 35
+Found 12 moves trivially
+[MSG] Found 12 trivial safe moves
+----- solver call end -----
+===== move 31 :: hidden=212 revealedNonMine=268 solverKnownMines=53 bombsLeft=46 =====
+[MSG] Thinking...
+tiles left = 159
+mines left = 46
+Witnesses  = 42
+Witnessed  = 44
+Found 13 moves trivially
+[MSG] Found 13 trivial safe moves
+----- solver call end -----
+===== move 32 :: hidden=206 revealedNonMine=274 solverKnownMines=60 bombsLeft=39 =====
+[MSG] Thinking...
+tiles left = 146
+mines left = 39
+Witnesses  = 32
+Witnessed  = 37
+Found 17 moves trivially
+[MSG] Found 17 trivial safe moves
+----- solver call end -----
+===== move 33 :: hidden=193 revealedNonMine=287 solverKnownMines=64 bombsLeft=35 =====
+[MSG] Thinking...
+tiles left = 129
+mines left = 35
+Witnesses  = 30
+Witnessed  = 37
+Found 14 moves trivially
+[MSG] Found 14 trivial safe moves
+----- solver call end -----
+===== move 34 :: hidden=181 revealedNonMine=299 solverKnownMines=66 bombsLeft=33 =====
+[MSG] Thinking...
+tiles left = 115
+mines left = 33
+Witnesses  = 31
+Witnessed  = 36
+Found 14 moves trivially
+[MSG] Found 14 trivial safe moves
+----- solver call end -----
+===== move 35 :: hidden=164 revealedNonMine=316 solverKnownMines=69 bombsLeft=30 =====
+[MSG] Thinking...
+tiles left = 95
+mines left = 30
+Witnesses  = 29
+Witnessed  = 31
+Found 3 moves trivially
+[MSG] Found 3 trivial safe moves
+[MSG] Thinking...
+tiles left = 92
+mines left = 27
+Witnesses  = 22
+Witnessed  = 28
+Found 1 moves trivially
+[MSG] Found 1 trivial safe moves
+----- solver call end -----
+===== move 36 :: hidden=163 revealedNonMine=317 solverKnownMines=72 bombsLeft=27 =====
+[MSG] Thinking...
+tiles left = 91
+mines left = 27
+Witnesses  = 22
+Witnessed  = 29
+Found 1 moves trivially
+[MSG] Found 1 trivial safe moves
+[MSG] Thinking...
+tiles left = 90
+mines left = 26
+Witnesses  = 21
+Witnessed  = 28
+Found 1 moves trivially
+[MSG] Found 1 trivial safe moves
+----- solver call end -----
+===== move 37 :: hidden=162 revealedNonMine=318 solverKnownMines=73 bombsLeft=26 =====
+[MSG] Thinking...
+tiles left = 89
+mines left = 26
+Witnesses  = 21
+Witnessed  = 29
+Found 1 moves trivially
+[MSG] Found 1 trivial safe moves
+[MSG] Thinking...
+tiles left = 88
+mines left = 25
+Witnesses  = 20
+Witnessed  = 28
+Found 2 moves trivially
+[MSG] Found 2 trivial safe moves
+----- solver call end -----
+===== move 38 :: hidden=160 revealedNonMine=320 solverKnownMines=74 bombsLeft=25 =====
+[MSG] Thinking...
+tiles left = 86
+mines left = 25
+Witnesses  = 20
+Witnessed  = 29
+Found 3 moves trivially
+[MSG] Found 3 trivial safe moves
+----- solver call end -----
+===== move 39 :: hidden=157 revealedNonMine=323 solverKnownMines=74 bombsLeft=25 =====
+[MSG] Thinking...
+tiles left = 83
+mines left = 25
+Witnesses  = 22
+Witnessed  = 30
+Found 2 moves trivially
+[MSG] Found 2 trivial safe moves
+[MSG] Thinking...
+tiles left = 81
+mines left = 23
+Witnesses  = 21
+Witnessed  = 28
+Found 0 moves trivially
+Pruned 1 witnesses as duplicates
+There are 21 Box witnesses
+(14,10) is candidate dead with 1 good boxes and 0 bad boxes
+(14,11) is candidate dead with 2 good boxes and 0 bad boxes
+(14,12) is candidate dead with 3 good boxes and 0 bad boxes
+Ending independent edge
+(14,12) has been determined to be locally clear
+(14,13) has been determined to be locally clear
+The probability engine did a truncated analysis - probability data is not available
+Probability Engine took 0 milliseconds to complete
+[MSG] Found 2 safe tiles. 0 possible solutions remain.
+Checking for unavoidable 50/50 or pseudo 50/50.
+Tile (14,11) is a closed extension with 2 parts
+Tile (28,11) is a closed extension with 2 parts
+Tile (25,12) is the open end of a chain consisting of 2 tiles
+Tile (1,13) is the open end of a chain consisting of 2 tiles
+Tile (3,13) is the open end of a chain consisting of 4 tiles
+Tile (14,14) is a closed extension with 2 parts
+
+-------- Starting Best Guess Analysis --------
+Long term risk not being considered
+
+-------- Tile (1,13) --------
+Tile (1,13) has 6 linked living tiles and dominated=false
+Tile (1,13) with value 2 Probability 0 ==> Safest 1, Blended safety 1, Single safest tile: none, living clears 9
+Tile (1,13) with value 3 Probability 0 ==> Safest 1, Blended safety 1, Single safest tile: none, living clears 6
+Tile (1,13) with value 4 Probability 0 ==> Safest 1, Blended safety 1, Single safest tile: none, living clears 6
+Tile (1,13) with value 5 Probability 0 ==> Safest 1, Blended safety 1, Single safest tile: none, living clears 6
+Tile (1,13), secondary safety = 0, 50/50 influence = 1, blended safety = 0, progress = 0, expected clears = 0, always clear = 6, final score = 0
+Tile (1,13) is now the best with score 0
+
+-------- Tile (3,13) --------
+Tile (3,13) has 6 linked living tiles and dominated=false
+Tile (3,13) is being pruned,  50/50 influence = 1, max score possible is -0.999
+
+Solver recommends tile (1,13)
+Best Guess analysis took 1 milliseconds to complete
+[MSG] Tile (1,13) is an unavoidable 50/50 guess, or safe. 0 possible solutions remain.
+----- solver call end -----
+!! MOVE 39 BLEW UP on (1,13) (prob -1)
