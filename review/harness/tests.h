@@ -12,3 +12,5 @@ void testExactAnalyze(Gen& g, int iter);     // T4 Exact::analyze vs 参考枚�
 void testExactObserve(Gen& g, int iter);     // T5 Exact::observe vs 参考枚举
 void testEndgame(Gen& g, int iter);          // T8 EndgameBruteforce vs 朴素最优解
 void testRadixSort(Gen& g, int iter);        // T7 radix_sort 正确性与稳定性
+void testDeltaReverse(Gen& g, int iter);     // T9 Delta apply/unapply 往返（树状路径游走）
+void testFrontierCells(Gen& g, int iter);    // T10 frontierCells == 暴力扫描

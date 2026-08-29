@@ -48,6 +48,14 @@ int main() {
     testEndgame(g, 40000);  // T8 更密集搜索（诚实概率网格）
     std::printf("T8 done (%.2fs)\n", nowSec() - t0);
 
+    t0 = nowSec();
+    testDeltaReverse(g, 20000);  // T9 Delta apply/unapply 往返（树状路径游走）
+    std::printf("T9 done (%.2fs)\n", nowSec() - t0);
+
+    t0 = nowSec();
+    testFrontierCells(g, 20000);  // T10 frontierCells == 暴力扫描
+    std::printf("T10 done (%.2fs)\n", nowSec() - t0);
+
     const double total = nowSec() - tTot0;
     std::printf("== done: %d checks, %d fails, %.2fs total ==\n", T::checks, T::fails,
                 total);
@@ -55,9 +63,9 @@ int main() {
 }
 
 // ── 基线记录（语料 = 可移植洗牌，seed 0xC0FFEE12345）──
-//   盘面数：T1 40000 / T2 20000 / T3 20000 / T4 30000 / T5 20000 / T7 6000 / T8 40000
-//   实测（调整后首次全量）：
-//     g++        -O1      : 1,615,041 checks / 0 fails / 5.70s 总耗时
-//     MSVC Release x64    : 1,615,041 checks / 0 fails / 6.21s
-//     MSVC Debug   x64    : 1,615,041 checks / 0 fails / 25.67s
-//   三配置逐位一致（语料可移植）。改盘面数/顺序/种子即失效，需重录。
+//   盘面数：T1 40000 / T2 20000 / T3 20000 / T4 30000 / T5 20000 / T7 6000 / T8 40000 / T9 20000 / T10 20000
+//   实测（T9/T10 加入后 g++ 重录；T1–T8 语料序列未变）：
+//     g++        -O1      : 1,792,156 checks / 0 fails / 5.81s 总耗时
+//     MSVC Release x64    : 待重录
+//     MSVC Debug   x64    : 待重录
+//   语料可移植（同种子跨编译器逐位一致）。改盘面数/顺序/种子即失效，需重录。

@@ -69,6 +69,10 @@ struct Basic {
         int unknownSum = 0;
         int mineSum = 0;
         bool valid = true;
+        // 应用前统计（update 开头记录；applyDelta(reverse=true) 撤销时恢复用）。
+        int oldUnknownSum = 0;
+        int oldMineSum = 0;
+        bool oldValid = true;
     };
 
     // ── 算法类 ──
@@ -88,7 +92,9 @@ struct Basic {
 
         // 按 Delta 应用标记（标记与统计以 Delta 为准）。
         // 用于把预先算好的 Delta 落到另一份 result（重放/同步）。
-        static void applyDelta(Result& result, const Delta& delta);
+        // reverse=true：撤销（状态须恰处于"应用该 delta 后"，LIFO）——
+        // 逆序遍历 changes 置回 old，统计恢复应用前值。搜索树游走退出用。
+        static void applyDelta(Result& result, const Delta& delta, bool reverse = false);
     };
 };
 
@@ -183,6 +189,9 @@ inline Basic::Delta Basic::Updater::update(const ObservedBoard& board,
                                            const std::vector<Update>& updates) {
     using Mark = Basic::Mark;
     Delta delta;
+    delta.oldUnknownSum = result.unknownSum;
+    delta.oldMineSum = result.mineSum;
+    delta.oldValid = result.valid;
     const int rows = board.rows;
     const int cols = board.cols;
 
@@ -238,7 +247,20 @@ inline Basic::Delta Basic::Updater::update(const ObservedBoard& board,
     return delta;
 }
 
-inline void Basic::Updater::applyDelta(Result& result, const Delta& delta) {
+inline void Basic::Updater::applyDelta(Result& result, const Delta& delta, bool reverse) {
+    if (reverse) {
+        // 撤销：逆序回放标记（同格多次变化时逆序回退整链），统计恢复应用前值。
+        for (std::size_t i = delta.changes.size(); i-- > 0;) {
+            const Delta::Change& c = delta.changes[static_cast<std::size_t>(i)];
+            const int x = c.cell / (result.cols + 1);
+            const int y = c.cell % (result.cols + 1);
+            result.marks[x][y] = c.old;
+        }
+        result.unknownSum = delta.oldUnknownSum;
+        result.mineSum = delta.oldMineSum;
+        result.valid = delta.oldValid;
+        return;
+    }
     for (const Delta::Change& c : delta.changes) {
         const int x = c.cell / (result.cols + 1);
         const int y = c.cell % (result.cols + 1);

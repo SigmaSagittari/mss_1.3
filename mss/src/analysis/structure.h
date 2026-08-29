@@ -88,10 +88,13 @@ struct Structure {
     // removed 是"删除动作轨迹"：依执行顺序记录被删组件所处的数组槽位（天然降序，
     // 即 update 3.5 段删除时的槽位）；applyDelta 依序机械重放（swap-pop + cellLoc
     // 重映射）即与 update 的物理删除完全一致，无需排序。
+    // removedData 与 removed 同序（pop 顺序）：各被删槽位的原组件数据——
+    // 被覆盖/弹出后原数据即丢失，applyDelta(reverse=true) 用它换回原组件。
     // added 与 addedData 对齐：added[i] = 真实状态里新增组件的 id，
     // addedData[i] = 该组件的完整数据（重放态没有别的来源，必须自带）。
     struct Delta {
         std::vector<ComponentId> removed;
+        std::vector<Instance> removedData;
         std::vector<ComponentId> added;
         std::vector<Instance> addedData;
     };
@@ -129,7 +132,10 @@ struct Structure {
         // 把 Delta 应用到另一份 Result（搜索树节点增量重放）：
         // 从根沿路径逐个应用，或父节点 → 子节点增量到达。
         // 等价于 update 的结构变更部分，不触碰 board/basic（由调用方保持同步）。
-        static void applyDelta(Result& result, const Delta& delta);
+        // reverse=true：撤销（状态须恰处于"应用该 delta 后"，LIFO）——
+        // 弹出被追加的 added 组件，再用 removedData 逆序换回被删组件。
+        // 搜索树游走退出用。
+        static void applyDelta(Result& result, const Delta& delta, bool reverse = false);
     };
 
     // ── 实现区 ──
@@ -468,6 +474,8 @@ inline Structure::Delta Structure::Updater::update(const ObservedBoard& state,
                 continue;
             }
             delta.removed.push_back(i);
+            // 覆盖/弹出前拷贝原组件（applyDelta(reverse=true) 恢复用，与 removed 同序）。
+            delta.removedData.push_back(result.components[static_cast<std::size_t>(i)]);
             const ComponentId last =
                 static_cast<ComponentId>(result.components.size()) - 1;
             if (i != last) {
@@ -536,7 +544,46 @@ inline Structure::Delta Structure::Updater::update(const ObservedBoard& state,
 // 完全等价：delta.removed 是删除动作轨迹（槽位、按执行顺序），依序机械重放
 // （swap-pop + cellLoc 重映射），然后按序追加 addedData。无需排序。
 // 前置：result 必须是产生该 Delta 时的那份状态（从根沿路径应用即满足）。
-inline void Structure::Updater::applyDelta(Result& result, const Delta& delta) {
+// reverse=true：撤销（须恰处于"应用该 delta 后"，LIFO——搜索树游走退出）：
+//   顺序与 apply 相反——先按逆序弹出被追加的 added 组件（清 cellLoc），再
+//   逆序恢复 removed 槽位：把槽位当前组件（apply 时从尾部搬来的）push_back
+//   回尾部并重映射 cellLoc，用 removedData（与 removed 槽位列同序）换回原
+//   组件并回填其 cellLoc。
+inline void Structure::Updater::applyDelta(Result& result, const Delta& delta, bool reverse) {
+    if (reverse) {
+        for (std::size_t n = delta.addedData.size(); n-- > 0;) {
+            const Instance& victim = result.components.back();
+            for (std::size_t b = 0; b < victim.boxes.count(); ++b)
+                for (std::size_t k = victim.boxes.boxOf[b]; k < victim.boxes.boxOf[b + 1]; ++k)
+                    result.cellLoc[static_cast<std::size_t>(victim.boxes.cells[k])] = CellLocation{};
+            for (CellId c : victim.constraintCells)
+                result.cellLoc[static_cast<std::size_t>(c)] = CellLocation{};
+            result.components.pop_back();
+        }
+        for (std::size_t k = delta.removed.size(); k-- > 0;) {
+            const ComponentId i = delta.removed[k];
+            const ComponentId tail = static_cast<ComponentId>(result.components.size());
+            result.components.push_back(
+                std::move(result.components[static_cast<std::size_t>(i)]));
+            const Instance& moved = result.components[static_cast<std::size_t>(tail)];
+            for (std::size_t b = 0; b < moved.boxes.count(); ++b)
+                for (std::size_t j = moved.boxes.boxOf[b]; j < moved.boxes.boxOf[b + 1]; ++j)
+                    result.cellLoc[static_cast<std::size_t>(moved.boxes.cells[j])] =
+                        CellLocation{tail, static_cast<BoxId>(b)};
+            for (CellId c : moved.constraintCells)
+                result.cellLoc[static_cast<std::size_t>(c)] = CellLocation{tail, -1};
+            result.components[static_cast<std::size_t>(i)] = delta.removedData[k];
+            const Instance& restored = result.components[static_cast<std::size_t>(i)];
+            for (std::size_t b = 0; b < restored.boxes.count(); ++b)
+                for (std::size_t j = restored.boxes.boxOf[b]; j < restored.boxes.boxOf[b + 1]; ++j)
+                    result.cellLoc[static_cast<std::size_t>(restored.boxes.cells[j])] =
+                        CellLocation{i, static_cast<BoxId>(b)};
+            for (CellId c : restored.constraintCells)
+                result.cellLoc[static_cast<std::size_t>(c)] = CellLocation{i, -1};
+        }
+        return;
+    }
+
     for (const ComponentId i : delta.removed) {
         // 先清被删组件的 cellLoc（与 update 的作废语义对齐）：否则重放后
         // 这些格子仍指向已删除/已挪走的组件，observe 会读到脏归属。

@@ -16,6 +16,8 @@ namespace mss {
 //   - Result：精确引擎的生产物，小（按块），非 O(nm) 网格。
 //   - ComponentResult：单连通块的小结果（每 BoxId 的雷概率）。
 //   - mineProbability：getter，单格查询，只读。
+//   - frontierCells：getter，前沿格筛选（雷概率 < 阈值），按块枚举
+//     不物化整盘网格——比"全盘扫描 + 单格查询"快一个数量级。
 //   - ObserveResult：observe 引擎的产物——点开某格后的结果分布。
 //
 // 引擎实现：
@@ -34,6 +36,13 @@ struct Probability {
 
     // 精确/近似共享的查询视图。小（按块），非 O(nm) 网格。
     struct Result {
+        // 前沿格筛选的一条记录：坐标 + 雷概率（同盒同值，取 boxProbs）。
+        struct FrontierCell {
+            int x = 0;              // 1-based 行
+            int y = 0;              // 1-based 列
+            long double p = 0;      // 该格雷概率
+        };
+
         std::vector<ComponentResult> components;  // 下标 = ComponentId，与 Structure::Result 对齐
         long double tCellProbability = 0;         // Unknown 格雷密度（标量）
         long double candidates = 0;               // 候选方案数
@@ -44,6 +53,13 @@ struct Probability {
         long double mineProbability(CellId cell, const ObservedBoard& board,
                                     const Basic::Result& basic,
                                     const Structure::Result& structure) const;
+
+        // getter：返回雷概率严格小于 p 的全部前沿格（坐标 + 概率）。
+        // 按块枚举（components.boxProbs，复用 mineProbability 的取数路径），
+        // 不物化整盘网格；概率 ≥ p 的 box 整盒跳过。调用方自排序。
+        std::vector<FrontierCell> frontierCells(const ObservedBoard& board,
+                                                const Structure::Result& structure,
+                                                long double p) const;
     };
 
     // 观察结果：点开格子 x 后的结果分布。
@@ -70,6 +86,27 @@ inline long double Probability::Result::mineProbability(
     if (loc.box == -1) return 0.0L;  // 约束数字格（已揭示）
     return components[static_cast<std::size_t>(loc.component)].boxProbs[
         static_cast<std::size_t>(loc.box)];
+}
+
+inline std::vector<Probability::Result::FrontierCell> Probability::Result::frontierCells(
+    const ObservedBoard& board, const Structure::Result& structure, long double p) const {
+    std::vector<FrontierCell> out;
+    // 按块枚举：components 下标 = ComponentId，与 structure.components 对齐；
+    // boxProbs 的取值路径与 mineProbability 相同（均摊单格概率）。
+    for (std::size_t cid = 0; cid < components.size(); ++cid) {
+        const ComponentResult& cr = components[static_cast<std::size_t>(cid)];
+        const Structure::Instance& inst =
+            structure.components[static_cast<std::size_t>(cid)];
+        for (std::size_t b = 0; b < cr.boxProbs.size(); ++b) {
+            const long double prob = cr.boxProbs[static_cast<std::size_t>(b)];
+            if (!(prob < p)) continue;  // 整个 box 概率 ≥ p：整盒跳过
+            for (std::size_t k = inst.boxes.boxOf[b]; k < inst.boxes.boxOf[b + 1]; ++k) {
+                const auto [x, y] = board.pos(inst.boxes.cells[k]);  // 同 mineProbability 反解
+                out.push_back(FrontierCell{x, y, prob});
+            }
+        }
+    }
+    return out;
 }
 
 }  // namespace mss

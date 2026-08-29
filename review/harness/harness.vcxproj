@@ -148,6 +148,8 @@
     <ClCompile Include="test_exact_observe.cpp" />
     <ClCompile Include="test_radix_sort.cpp" />
     <ClCompile Include="test_structure_update.cpp" />
+    <ClCompile Include="test_delta_reverse.cpp" />
+    <ClCompile Include="test_frontier_cells.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
