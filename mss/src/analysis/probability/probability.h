@@ -27,6 +27,8 @@ namespace mss {
 // ─────────────────────────────────────────────────────────────
 
 struct Probability {
+    static long double exactMineProbability(long double p);
+
     // 单连通块的小结果。
     struct ComponentResult {
         // 每单位格(BoxId)的雷概率，已按 boxSize 均摊为单格概率。
@@ -36,12 +38,6 @@ struct Probability {
 
     // 精确/近似共享的查询视图。小（按块），非 O(nm) 网格。
     struct Result {
-        // 前沿格筛选的一条记录：坐标 + 雷概率（同盒同值，取 boxProbs）。
-        struct FrontierCell {
-            int x = 0;              // 1-based 行
-            int y = 0;              // 1-based 列
-            long double p = 0;      // 该格雷概率
-        };
 
         std::vector<ComponentResult> components;  // 下标 = ComponentId，与 Structure::Result 对齐
         long double tCellProbability = 0;         // Unknown 格雷密度（标量）
@@ -53,6 +49,14 @@ struct Probability {
         long double mineProbability(CellId cell, const ObservedBoard& board,
                                     const Basic::Result& basic,
                                     const Structure::Result& structure) const;
+
+
+        // 前沿格筛选的一条记录：坐标 + 雷概率（同盒同值，取 boxProbs）。
+        struct FrontierCell {
+            int x = 0;              // 1-based 行
+            int y = 0;              // 1-based 列
+            long double p = 0;      // 该格雷概率
+        };
 
         // getter：返回雷概率严格小于 p 的全部前沿格（坐标 + 概率）。
         // 按块枚举（components.boxProbs，复用 mineProbability 的取数路径），
@@ -72,6 +76,9 @@ struct Probability {
 };
 
 // ── 实现区 ──
+inline long double Probability::exactMineProbability(long double p) {
+    return p >= 1.0L - 1e-10L ? 1.0L : p;
+}
 
 inline long double Probability::Result::mineProbability(
     CellId cell, const ObservedBoard& board, const Basic::Result& basic,
@@ -84,8 +91,8 @@ inline long double Probability::Result::mineProbability(
         return 0.0L;  // Safe / 已揭示数字
     }
     if (loc.box == -1) return 0.0L;  // 约束数字格（已揭示）
-    return components[static_cast<std::size_t>(loc.component)].boxProbs[
-        static_cast<std::size_t>(loc.box)];
+    return Probability::exactMineProbability(components[static_cast<std::size_t>(loc.component)].boxProbs[
+        static_cast<std::size_t>(loc.box)]);
 }
 
 inline std::vector<Probability::Result::FrontierCell> Probability::Result::frontierCells(

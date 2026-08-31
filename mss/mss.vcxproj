@@ -149,7 +149,8 @@
   <ItemGroup>
     <ClInclude Include="src\analysis\basic.h" />
     <ClInclude Include="src\analysis\bruteforce\endgame_bruteforce.h" />
-    <ClInclude Include="src\analysis\bruteforce\midgame_search.h" />
+    <ClInclude Include="src\analysis\midgame\midgame_search.h" />
+    <ClInclude Include="src\analysis\midgame\secondary_safety_evaluator.h" />
     <ClInclude Include="src\analysis\distribution.h" />
     <ClInclude Include="src\analysis\probability\exact.h" />
     <ClInclude Include="src\analysis\probability\probability.h" />

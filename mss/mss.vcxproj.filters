@@ -28,6 +28,9 @@
     <Filter Include="头文件\analysis\bruteforce">
       <UniqueIdentifier>{0bc1c142-2a75-460f-aeea-d162d5a2fc86}</UniqueIdentifier>
     </Filter>
+    <Filter Include="头文件\analysis\midgame">
+      <UniqueIdentifier>{864c8bc3-9f09-42b1-87ec-fdfc2f40d623}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\core\types.h">
@@ -69,11 +72,14 @@
     <ClInclude Include="src\analysis\bruteforce\endgame_bruteforce.h">
       <Filter>头文件\analysis\bruteforce</Filter>
     </ClInclude>
-    <ClInclude Include="src\analysis\bruteforce\midgame_search.h">
-      <Filter>头文件\analysis\bruteforce</Filter>
-    </ClInclude>
     <ClInclude Include="src\analysis\probability\probability.h">
       <Filter>头文件\analysis\probability</Filter>
+    </ClInclude>
+    <ClInclude Include="src\analysis\midgame\midgame_search.h">
+      <Filter>头文件\analysis\midgame</Filter>
+    </ClInclude>
+    <ClInclude Include="src\analysis\midgame\secondary_safety_evaluator.h">
+      <Filter>头文件\analysis\midgame</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

@@ -188,7 +188,7 @@ inline Probability::Result Exact::analyze(const ObservedBoard& board,
             lightProb += pH.coeffs[static_cast<std::size_t>(i)] * combLog(tSum - 1, lightMines);
     }
     lightProb /= denom;
-    result.tCellProbability = lightProb;
+    result.tCellProbability = Probability::exactMineProbability(lightProb);
     result.candidates = denom;
 
     // 每连通块：各分布的取到概率 → 每 box 的雷概率（均摊）。

@@ -6,14 +6,12 @@
 
 namespace mss {
 
-// 1-based 坐标的二维网格：有效坐标范围 [1, rows] × [1, cols]。
-// 内部多保留一行/列作为边框，这样遍历邻居时不需要做边界分支。
+// 使用 1-based 坐标的二维网格。
 template <typename T>
 class Grid {
 public:
     Grid() = default;
 
-    // 分配 rows × cols 的有效区（外加一圈边框），全部填充 value
     Grid(int rows, int cols, const T& value) { resize(rows, cols, value); }
 
     void resize(int rows, int cols, const T& value) {
@@ -39,7 +37,7 @@ public:
         return data_[index(x, y)];
     }
 
-    // 支持 grid[i][j] 的写法，语义等价于 at(i, j)
+    // 支持 grid[i][j]。
     auto operator[](int i) {
         struct Row {
             Grid& grid;
@@ -60,7 +58,6 @@ public:
 
 private:
     std::size_t index(int x, int y) const {
-        // 内部步长为 cols+1（含边框列）
         return static_cast<std::size_t>(x) * (cols_ + 1) + y;
     }
 
