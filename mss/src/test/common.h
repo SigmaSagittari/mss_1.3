@@ -16,6 +16,7 @@
 
 namespace mss::test {
 
+// 测试专用 xorshift64*（与 core 的 Rng/splitmix64 无关）；固定种子可复现。
 struct Rng {
     std::uint64_t state;
     explicit Rng(std::uint64_t seed = 0x9e3779b97f4a7c15ULL) : state(seed) {}
@@ -31,6 +32,7 @@ struct Rng {
 struct Counters { long long checks = 0; long long failures = 0; };
 inline Counters& counters() { static Counters value; return value; }
 
+// 收集观测到的雷概率极值，便于复现/定位浮点边界问题。
 struct ProbabilityExtremes {
     long double minPositive = 1.0L;
     long double maxBelowOne = 0.0L;
@@ -102,8 +104,10 @@ struct GameConfig {
     int rows = 16;
     int cols = 30;
     int mines = 99;
-    PositionFilter filter = PositionFilter::All;
-    int maxRestarts = 10000;
+    PositionFilter filter = PositionFilter::All;  // All：全部局面；GuessOnly：只留必须猜的局面
+    int maxRestarts = 10000;                      // 生成一条可赢对局的重试上限
+    bool requireWinningGame = true;
+    bool firstMoveSafe = false;
 };
 
 struct Game {
@@ -114,9 +118,12 @@ struct Game {
         mines(static_cast<std::size_t>(c.rows * c.cols), 0) {}
     int flat(int x, int y) const { return (x - 1) * board.cols + (y - 1); }
     bool mine(int x, int y) const { return mines[static_cast<std::size_t>(flat(x, y))] != 0; }
-    void placeMines(Rng& rng) {
+    void placeMines(Rng& rng, bool firstMoveSafe) {
         std::vector<int> cells(static_cast<std::size_t>(board.rows * board.cols));
-        for (int i = 0; i < static_cast<int>(cells.size()); ++i) cells[static_cast<std::size_t>(i)] = i;
+        const int first = firstMoveSafe ? 1 : 0;
+        for (int i = first; i < static_cast<int>(cells.size()); ++i)
+            cells[static_cast<std::size_t>(i - first)] = i;
+        cells.resize(cells.size() - first);
         for (int i = static_cast<int>(cells.size()) - 1; i > 0; --i)
             std::swap(cells[static_cast<std::size_t>(i)], cells[static_cast<std::size_t>(rng.below(i + 1))]);
         for (int i = 0; i < board.totalMines; ++i) mines[static_cast<std::size_t>(cells[i])] = 1;
@@ -126,14 +133,16 @@ struct Game {
         forEachAdjacent(x, y, board.rows, board.cols, [&](int nx, int ny) { total += mine(nx, ny); });
         return total;
     }
-    bool reveal(int x, int y) {
+    bool reveal(int x, int y, std::vector<Basic::Update>& updates) {
         if (mine(x, y)) return false;
+        // 翻出 0 则连锁泛洪（BFS 展开整个空区）。
         std::deque<std::pair<int, int>> pending{{x, y}};
         while (!pending.empty()) {
             const auto [cx, cy] = pending.front(); pending.pop_front();
             if (board.board[cx][cy] != Cell::Hidden || mine(cx, cy)) continue;
             const int digit = adjacentMines(cx, cy);
             board.board[cx][cy] = static_cast<Cell>(digit); ++opened;
+            updates.push_back(Basic::Update{board.id(cx, cy), static_cast<Cell>(digit)});
             if (digit == 0) forEachAdjacent(cx, cy, board.rows, board.cols,
                 [&](int nx, int ny) { pending.emplace_back(nx, ny); });
         }
@@ -151,6 +160,12 @@ struct Analysis {
     explicit Analysis(const ObservedBoard& b) : basic(Basic::Analyzer::analyze(b)),
         structure(Structure::Analyzer::analyze(b, basic, shapes)),
         probability(Exact::analyze(b, basic, structure, distributions)) {}
+
+    void update(const ObservedBoard& board, const std::vector<Basic::Update>& updates) {
+        Basic::Updater::update(board, basic, updates);
+        Structure::Updater::update(board, basic, structure, shapes, updates);
+        probability = Exact::analyze(board, basic, structure, distributions);
+    }
 };
 
 struct Move { int x = 0; int y = 0; long double mineProbability = 1.0L; };
@@ -167,25 +182,30 @@ inline Move lowestRiskMove(const ObservedBoard& board, const Analysis& analysis)
 
 struct Snapshot { const Game& game; const Analysis& analysis; Move next; bool mustGuess = false; };
 
-// Random mine layouts are played by the exact minimum-risk policy. Losing layouts are discarded,
-// hence every emitted position lies on a complete winning game; zeroes are flood-revealed.
+// 随机雷局按"最低雷概率"策略打完整局；输局丢弃——发出的每个局面都来自
+// 一条完整可赢的对局；数字 0 处连锁翻开。
 template <typename Fn>
 inline void generateGame(const GameConfig& config, Rng& rng, Fn&& consume) {
     if (config.rows <= 0 || config.cols <= 0 || config.mines < 0 ||
         config.mines >= config.rows * config.cols) std::abort();
     for (int restart = 0; restart < config.maxRestarts; ++restart) {
-        Game game(config); game.placeMines(rng); bool lost = false;
+        Game game(config); game.placeMines(rng, config.firstMoveSafe); bool lost = false;
+        if (config.firstMoveSafe) {
+            std::vector<Basic::Update> firstMove;
+            game.reveal(1, 1, firstMove);
+        }
+        Analysis analysis(game.board);
         while (!game.won()) {
-            Analysis before(game.board);
-            const Move move = lowestRiskMove(game.board, before);
-            if (move.x == 0 || !game.reveal(move.x, move.y)) { lost = true; break; }
+            const Move move = lowestRiskMove(game.board, analysis);
+            std::vector<Basic::Update> updates;
+            if (move.x == 0 || !game.reveal(move.x, move.y, updates)) { lost = true; break; }
             if (game.won()) break;
-            Analysis after(game.board);
-            const Move next = lowestRiskMove(game.board, after);
-            const Snapshot snapshot{game, after, next, next.mineProbability > 1e-15L};
+            analysis.update(game.board, updates);
+            const Move next = lowestRiskMove(game.board, analysis);
+            const Snapshot snapshot{game, analysis, next, next.mineProbability > 1e-15L};
             if (config.filter == PositionFilter::All || snapshot.mustGuess) consume(snapshot);
         }
-        if (!lost && game.won()) return;
+        if ((!lost && game.won()) || !config.requireWinningGame) return;
     }
     std::cerr << "could not generate a winning game after " << config.maxRestarts << " restarts\n";
     std::abort();

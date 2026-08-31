@@ -23,12 +23,12 @@ namespace mss {
 // ─────────────────────────────────────────────────────────────
 // bruteforce/endgame_bruteforce.h — 残局精确求解（暴力枚举）。
 //
-// 枚举全部满足约束的摆雷方案，递归求解"点哪个格、按观测分组继续、
-// 能保证赢下多少条方案"。可输出每个候选初始招法的精确胜数。
+// 枚举全部满足约束的摆雷方案，递归求解"点哪个格、按观测分组继续、能保证
+// 赢下多少条方案"，可输出每个候选初始招法的精确胜数（或只给最优第一步）。
 //
-// 依赖 distribution.h 的 all_distribute（枚举摆雷）+ 调用方传入的
-// 单格雷概率网格（Exact 物化）。precheck 用
-// Exact::analyze 现算候选数，超过 kMaxBruteforceCount 直接 assert_。
+// 依赖 distribution.h 的 all_distribute（枚举摆雷）+ 调用方传入的单格雷概率
+// 网格（Exact 物化）。枚举前用 Exact::analyze 预检候选方案数，超过
+// kMaxBruteforceCount 直接 assert_。
 //
 // 数学/数据结构细节（Session、ScratchBuffers、solve 递归）全私有。
 // ─────────────────────────────────────────────────────────────
@@ -268,12 +268,12 @@ inline U128 EndgameBruteforce::hashConfigs(const std::vector<int>& configs) {
     return h.finalize();
 }
 
-// 递归求解当前集合 configs（有序的方案行号列表，s.opened 为当前已点开格）。
-// need：本组至少要赢下多少条才对上层有意义；depth：递归深度，对应第 depth 层暂存。
-// 返回：真实值 ≥ need 时为精确赢数；真实值 < need 时返回 0（不写缓存）。
+// 递归求解 configs（有序方案行号列表；s.opened 为当前已点开格）。
+// need：本组至少要赢下多少条才对上层有意义；depth：递归深度（对应暂存层）。
+// 返回：真实值 ≥ need 时为精确赢数；真实值 < need 时返回 0 且不写缓存——
 //       0 只表示"真实值 < need"，不表示真实值为 0。
-// CheckAllMoves=true 仅用于根层：对每个初始招法独立计算精确胜数并全部写入 out。
-// IsRoot 编译期标记当前节点是否为首层；只有首层实例化才会写入 out。
+// CheckAllMoves=true 仅用于根层：对每个初始招法独立计算精确胜数并全部写入
+// out。IsRoot 编译期标记当前节点是否为首层；只有首层实例化才会写入 out。
 template <bool CheckAllMoves, bool IsRoot>
 inline int EndgameBruteforce::solve(Session& s, ScratchBuffers& scratch,
                                     const std::vector<int>& configs, int need, int depth,

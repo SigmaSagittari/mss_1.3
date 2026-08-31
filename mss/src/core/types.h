@@ -8,20 +8,18 @@
 namespace mss {
 
 // ─────────────────────────────────────────────────────────────
-// types.h — core 层基础类型。
+// types.h — core 层基础类型（跨层共享的身份与状态）。
 //
-// 本项目所有跨层共享的"身份"与"state"都定义在这里：
-//   - Cell：盘面格子的取值（数字 0-8 / Hidden）
-//   - 整数 ID：CellId / ComponentId / BoxId / ShapeId / DistributionId
-//   - CellLocation：格子 → 连通块 + 单位格 的归属
-//   - ObservedBoard：流水线第一段 "state"（观察到的盘面）
+//   - Cell               格子取值（数字 0-8 / Hidden）
+//   - CellId 等整数句柄  稠密 int，一律以 vector 下标形式存储/传递（越界即 bug）
+//   - CellLocation       格子 → 所属连通块 + 单位格
+//   - ObservedBoard      流水线第一段 "state"（观察到的盘面）
 //
-// 设计约定：
-//   - 身份一律是稠密 int 句柄，不用裸指针、不用平行数组 + idx 手工同步。
-//     句柄生命周期由所属 Pool/Store 管理（ShapePool/DistCache 只增不删，
-//     ComponentStore 用可逆日志支持 checkpoint/rollback）。
-//   - core 层不含分析概念（连通块 / 分布 / 概率在 analysis 层），
-//     也不含游戏规则（雷位布局 / 翻开逻辑在 game 层）。
+// 约定：
+//   - 身份不用裸指针：句柄生命周期由所属池管理（ShapePool / DistPool
+//     只增不删、地址稳定，见 structure.h / distribution.h）。
+//   - core 层不含分析概念（连通块/分布/概率在 analysis 层），也不含游戏
+//     规则（雷位布局/翻开逻辑在 game 层）。
 // ─────────────────────────────────────────────────────────────
 
 // 盘面格子：0-8 为已翻开的数字，Hidden 为未翻开。
@@ -48,12 +46,12 @@ inline int numberValue(Cell c) {
 }
 
 // ── 整数身份 ──
-// 稠密整数句柄，全部以 vector 下标形式存储与传递，索引越界即 bug。
-using CellId = int;          // 棋盘格：x*(cols+1)+y（与 Grid 内部下标一致，可直接索引 cellLoc）
-using ComponentId = int;     // 连通块实例（ComponentStore 句柄）
-using BoxId = int;           // 单位格（ComponentShape 内局部下标，0..boxes.size()-1）
+// 稠密 int 句柄，全部以 vector 下标形式存储与传递，越界即 bug。
+using CellId = int;          // 棋盘格：x*(cols+1)+y（即 Grid 存储下标，可直接索引 cellLoc）
+using ComponentId = int;     // 连通块实例（Structure::Result::components 下标）
+using BoxId = int;           // 单位格（Shape 内局部下标，0..boxes.size()-1）
 using ShapeId = int;         // interned 不可变结构（ShapePool 句柄）
-using DistributionId = int;  // 分布缓存句柄（DistCache 句柄）
+using DistributionId = int;  // 分布缓存句柄（DistPool 句柄）
 
 // 格子 → (所属连通块, shape 内单位格下标)。
 // 不在任何连通块的格子（Safe/Mine/Unknown）component = -1。

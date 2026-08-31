@@ -12,8 +12,7 @@ inline std::uint64_t splitmix64(std::uint64_t x) {
     return x ^ (x >> 31);
 }
 
-// 显式随机数对象。旧代码到处传 unsigned long long& seed，
-// 这里收敛成一个对象，语义更清晰，也方便固定种子复现。
+// 显式随机数对象：状态封装成对象而非到处传 seed 引用，便于固定种子复现。
 struct Rng {
     std::uint64_t state = 0;
 

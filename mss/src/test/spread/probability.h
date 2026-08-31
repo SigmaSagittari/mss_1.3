@@ -27,6 +27,8 @@ inline void testProbabilitySpread(Rng& rng, int iter) {
                         static_cast<std::size_t>(loc.box)];
                 const long double p = probability.mineProbability(cell, board, basic, structure);
                 probabilityExtremes().note(raw);
+                // 定义 MSS_TEST_RAW_PROBABILITIES 时只记录原始概率、跳过语义
+                // 断言（调试浮点边界用，见 common.h 的 ProbabilityExtremes）。
                 if (!(p >= 0.0L && p <= 1.0L)) {
 #if defined(MSS_TEST_RAW_PROBABILITIES)
                     ++counters().checks;

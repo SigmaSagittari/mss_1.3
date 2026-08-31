@@ -8,8 +8,8 @@
 
 namespace mss {
 
-// 断言：失败时把消息 + 位置写入 mss_error.log 并退出。
-// 用函数而非宏，以便拿到调用处的 source_location（C++20）。
+// 断言失败：把消息与调用位置写入 mss_error.log 后退出（exit 1）。
+// 用函数而非宏，才能经 source_location 拿到调用处信息（C++20）。
 inline void assert_(bool condition, std::string_view message,
                     const std::source_location location =
                         std::source_location::current()) {

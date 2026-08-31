@@ -10,21 +10,21 @@
 
 namespace mss {
 
-// 通用 LSD 基数排序：语义命名空间（scope struct），不持有任何状态。
-// 排序键由调用方以"无符号整数字段访问器"给出，主序在前；
-// 排序器按字段本身的大小一把梭扫字节，不构造任何中间关键码。
-// 残局搜索用它对"观测向量哈希"分组，entry 小、量大，比 std::sort 快。
+// 通用 LSD 基数排序：语义命名空间（纯空壳，无状态）。
+// 排序键由调用方以"无符号整数字段访问器"给出（主序在前）；排序器按字段
+// 字节直接扫，不构造中间关键码。残局搜索用它按"观测向量哈希"分组——
+// entry 小、量大，比 std::sort 快。
 //
-// 稳定性说明（重要）：仅 n > kThreshold 的基数路径稳定（LSD 计数排序）；
-// n <= kThreshold 的小数组分支走 std::sort，属不稳定排序。需要稳定序时，
-// 调用方须自行保证键全序（例如附带唯一序号作末字段，见 endgame_bruteforce.h
-// 的 SafeEntry.p），或对等键做输入序保留处理。
+// 稳定性（重要）：基数路径（n > kThreshold）稳定（LSD 计数排序）；小数组
+// 分支走 std::sort，不稳定。需要稳定序时调用方须保证键全序（例如附带唯一
+// 序号作末字段，见 endgame_bruteforce.h 的 SafeEntry.p），或自行处理等键
+// 的输入序。
 struct radix_sort {
     // 条目数小于该值时用比较排序，省掉基数排序的固定开销
     static constexpr std::uint32_t kThreshold = 256;
 
-    // 按访问器给出的字段升序排序。tmp 是输出缓冲，由调用方持有、复用。
-    // 注意：n <= kThreshold 时经 std::sort 完成，不为稳定排序（见上方说明）。
+    // 按访问器给出的字段升序排序；tmp 为调用方持有、复用的输出缓冲。
+    // 小数组走 std::sort，不稳定（见类头说明）。
     template <typename Entry, typename... Accessor>
     static void sort(std::vector<Entry>& a, std::vector<Entry>& tmp, Accessor... accessor) {
         const std::uint32_t n = static_cast<std::uint32_t>(a.size());

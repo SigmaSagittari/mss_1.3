@@ -10,20 +10,16 @@
 namespace mss {
 
 // ─────────────────────────────────────────────────────────────
-// probability.h — 概率引擎的共享数据类。
+// probability.h — 概率引擎的共享数据类（只定义查询视图，不含算法）。
 //
-// 只定义"查询视图"，不含任何算法：
-//   - Result：精确引擎的生产物，小（按块），非 O(nm) 网格。
-//   - ComponentResult：单连通块的小结果（每 BoxId 的雷概率）。
-//   - mineProbability：getter，单格查询，只读。
-//   - frontierCells：getter，前沿格筛选（雷概率 < 阈值），按块枚举
-//     不物化整盘网格——比"全盘扫描 + 单格查询"快一个数量级。
-//   - ObserveResult：observe 引擎的产物——点开某格后的结果分布。
+//   Result            精确引擎产物，小（按块），非 O(nm) 网格。
+//   mineProbability   单格雷概率查询（只读 getter）。
+//   frontierCells     前沿格筛选（雷概率 < 阈值）：按块枚举，不物化整盘
+//                     网格——比"全盘扫描 + 单格查询"快一个数量级。
+//   ObserveResult     点开某格后的结果分布（observe 引擎产物）。
 //
-// 引擎实现：
-//   analysis/probability/exact.h → Exact（GF 多项式 + binomial）
-// 填 Result / ObserveResult（boxProbs/来源），UI 无需区分引擎。
-// 整盘网格物化（ProbabilityGrid）归 UI 适配器。
+// 引擎实现：exact.h → Exact（GF 多项式 + binomial）填 Result / ObserveResult，
+// UI 无需区分引擎。整盘网格物化（ProbabilityGrid）归 UI 适配器。
 // ─────────────────────────────────────────────────────────────
 
 struct Probability {
@@ -76,6 +72,7 @@ struct Probability {
 };
 
 // ── 实现区 ──
+// 钳制浮点尾差：p 距 1 在 1e-10 内一律视为 1（整除噪声归零为 1 的误差）。
 inline long double Probability::exactMineProbability(long double p) {
     return p >= 1.0L - 1e-10L ? 1.0L : p;
 }

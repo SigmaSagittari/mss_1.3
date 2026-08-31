@@ -14,23 +14,22 @@
 namespace mss {
 
 // ─────────────────────────────────────────────────────────────
-// structure.h — 盘面图论结构。
-//
-// 类型全部嵌套在 Structure 命名空间下：
-//   数据类：Shape / Instance / Result / Delta
-//   池：    ShapePool（interned 不可变 Shape，只增不删）
-//   算法类：Analyzer / Updater（纯空壳，无成员、零开销）
+// structure.h — 盘面图论结构：把 Frontier/数字格组织成连通块，供分布层计数。
 //
 // 核心拆分：
-//   - Shape：interned、不可变、无棋盘坐标，hash = 身份键。
-//     同构连通块跨盘面共享一份，分布按 shape 去重（Distribution 层挂
-//     第二个池 const Shape* → Distribution，不进 Instance）。
-//   - Instance：每份 Result 各一份，持 Shape 观察指针 + 本盘面位置数据。
+//   - Shape：interned、不可变、无棋盘坐标，hash 即身份键；同构连通块跨盘面
+//     共享一份，分布按 shape 去重（Distribution 层挂第二个池
+//     const Shape* → Distribution，不进 Instance）。
+//   - Instance：每份 Result 各一个：Shape 观察指针 + 本盘面位置数据。
 //
-// 层间（吃 DAG，非只吃上层 delta）：Analyzer/Updater 直接读
-// board + Basic::Result 当前状态；Updater 就地改 Result 只碰脏块，
-// 增量更新：就地修改 result（只碰受影响连通块，无整盘拷贝）。
-    // 返回 Delta 供搜索树增量重放（applyDelta），不做墓碑式保留。
+// 类型（全部嵌套在 Structure 下）：
+//   数据类  Shape / Instance / Result / Delta
+//   池      ShapePool（按 hash 去重，只增不删，Shape 地址稳定）
+//   算法类  Analyzer（全量）/ Updater（增量，就地改 Result 只碰脏块，
+//           返回 Delta 供搜索树增量重放/撤销，不做墓碑式保留）
+//
+// 层间：Analyzer/Updater 吃 DAG——直接读 board + Basic::Result 的当前状态，
+// 而非只吃上层 delta。
 // ─────────────────────────────────────────────────────────────
 
 struct Structure {
@@ -84,12 +83,12 @@ struct Structure {
         std::vector<CellLocation> cellLoc;  // 按 CellId 索引
     };
 
-    // 一次增量更新的变更集合（供搜索树增量重放 / UI 增量消费）。
-    // removed 是"删除动作轨迹"：依执行顺序记录被删组件所处的数组槽位（天然降序，
-    // 即 update 3.5 段删除时的槽位）；applyDelta 依序机械重放（swap-pop + cellLoc
-    // 重映射）即与 update 的物理删除完全一致，无需排序。
-    // removedData 与 removed 同序（pop 顺序）：各被删槽位的原组件数据——
-    // 被覆盖/弹出后原数据即丢失，applyDelta(reverse=true) 用它换回原组件。
+    // 一次增量更新的变更集（搜索树增量重放 / UI 增量消费）。
+    // removed 是"删除动作轨迹"：依执行顺序记录被删组件所处的数组槽位
+    // （update 3.5 段 swap-pop，天然降序）；applyDelta 依序机械重放
+    // （swap-pop + cellLoc 重映射）即与 update 的物理删除完全一致，无需排序。
+    // removedData 与 removed 同序（pop 顺序）：各槽位的原组件数据——被覆盖/
+    // 弹出后原数据即丢失，撤销时用它换回原组件。
     // added 与 addedData 对齐：added[i] = 真实状态里新增组件的 id，
     // addedData[i] = 该组件的完整数据（重放态没有别的来源，必须自带）。
     struct Delta {
@@ -122,18 +121,17 @@ struct Structure {
     };
 
     struct Updater {
-        // 增量更新：就地修改 result（只碰受影响连通块，无整盘拷贝）。
-        // 前置条件：board 与 basic 已被外部更新为揭示后的状态，
-        // updates 说明哪些格子变了、变为什么（定位脏区）。
+        // 增量更新：就地改 result（只碰受影响连通块，无整盘拷贝）。
+        // 前置：board 与 basic 已被外部更新为揭示后的状态，updates 列出变化
+        // 的格子（定位脏区）。
         static Delta update(const ObservedBoard& board, const Basic::Result& basic,
                             Result& result, ShapePool& pool,
                             const std::vector<Basic::Update>& updates);
         
-        // 把 Delta 应用到另一份 Result（搜索树节点增量重放）：
-        // 从根沿路径逐个应用，或父节点 → 子节点增量到达。
-        // 等价于 update 的结构变更部分，不触碰 board/basic（由调用方保持同步）。
-        // reverse=true：撤销（状态须恰处于"应用该 delta 后"，LIFO）——
-        // 弹出被追加的 added 组件，再用 removedData 逆序换回被删组件。
+        // 把 Delta 应用到另一份 Result（搜索树节点增量重放，从根沿路径逐个
+        // 应用即得节点状态）。等价于 update 的结构变更部分，不触碰
+        // board/basic（由调用方保持同步）。reverse=true 为撤销（LIFO）：
+        // 先弹出被追加的 added 组件，再用 removedData 逆序换回被删组件。
         // 搜索树游走退出用。
         static void applyDelta(Result& result, const Delta& delta, bool reverse = false);
     };
@@ -232,6 +230,7 @@ inline void Structure::collectComponent(int x, int y, const ObservedBoard& state
                                         const Basic::Result& basic, Grid<char>& vis,
                                         std::vector<std::pair<int, int>>& cells) {
     using Mark = Basic::Mark;
+    // 双向扩散：数字格 → Frontier 邻格，Frontier 格 → 数字邻格。
     auto dfs = [&](auto&& self, int cx, int cy) -> void {
         if (vis[cx][cy]) return;
         vis[cx][cy] = 1;
@@ -364,10 +363,10 @@ inline Structure::Delta Structure::Updater::update(const ObservedBoard& state,
         cellHash.resize(rows, cols, U128{});
         cells.reserve(static_cast<std::size_t>(rows * cols / 2));
     }
-    // 与组件数组平行的临时删标：每次更新开头**整体**清零。
-    // 不能只在 size 增长时 resize(comps,0)（只零新尾部）：上一轮"弹出+追加"后，
-    // 前缀可能残留旧 1——实测残留 flag 会把从未作废的活组件当垃圾删掉（并且 step2
-    // 的 removedFlag 短路会跳过其合法作废），成员 cellLoc 残留脏归属。
+    // removedFlag 与组件数组平行，每次更新开头必须**整体**清零：
+    // 只在数组增长时补零会残留上一轮的删标——把从未作废的活组件当垃圾删掉
+    // （且 step2 的删标短路会跳过其合法作废），成员 cellLoc 残留脏归属。
+    // assign(size, 0) 即全量清零。
     removedFlag.assign(result.components.size(), 0);
 
     // 标记某格为脏：去重，并记录位置到 dirtyCells。
@@ -380,9 +379,9 @@ inline Structure::Delta Structure::Updater::update(const ObservedBoard& state,
     auto clearCellLoc = [&](int x, int y) {
         result.cellLoc[static_cast<std::size_t>(state.id(x, y))] = CellLocation{};
     };
-    // 作废一个组件：打删标、成员全部标脏并清归属（连通块是不可拆分的更新单位）。
-    // 删标放在与组件数组平行的 removedFlag 里（update 内部临时工具，不进公共
-    // Instance 类型，避免随 Delta::addedData 泄漏给重放/UI 消费方）。
+    // 作废一个组件：打删标、成员全部标脏并清归属（连通块是不可拆分的更新
+    // 单位）。删标放在 update 内部的临时 removedFlag，不进公共 Instance 类型，
+    // 避免随 Delta::addedData 泄漏给重放/UI 消费方。
     auto invalidateComponent = [&](ComponentId cid) {
         removedFlag[static_cast<std::size_t>(cid)] = 1;
         const Instance& inst = result.components[static_cast<std::size_t>(cid)];
@@ -399,11 +398,11 @@ inline Structure::Delta Structure::Updater::update(const ObservedBoard& state,
         }
     };
 
-    // 1. 值事件格 + 八邻域全部标脏（唯一的脏信号源）。
-    //    只支持揭示更新（见下断言）：纯揭示世界里，新标雷必在"事件格所属组件"
-    //    内（组件原子性闭环），新 Frontier 必在八邻域内，故单环即闭环。
-    //    回滚更新（next==Hidden）已移除——它会在事件第 2 环解除 Mine 标记、
-    //    把本是 Mine 的格翻回 Frontier，需要两环标脏才能覆盖（实测 it=190）。
+    // 1. 脏信号源：事件格 + 八邻域全部标脏（唯一入口）。
+    //    只支持揭示更新（断言）：纯揭示世界里，新标雷必在"事件格所属组件"
+    //    内（组件原子性闭环）、新 Frontier 必在八邻域内，单环即闭环。
+    //    回滚更新（next==Hidden）已移除——它会在第二轮传播里解除 Mine 标记、
+    //    把本是 Mine 的格翻回 Frontier，需要两环标脏才能覆盖。
     for (const Basic::Update& u : updates)
         assert_(u.next != Cell::Hidden,
                 "Structure::Updater: 不支持回滚更新（next 必须为数字 0..8）");
@@ -449,11 +448,9 @@ inline Structure::Delta Structure::Updater::update(const ObservedBoard& state,
             if (basic.marks[x][y] != Mark::Frontier || vis[x][y]) continue;
             cells.clear();
             collectComponent(x, y, state, basic, vis, cells);
-            // 不需要「吞并作废」：step2 的动态闭包已把事件波及的所有组件整块作废
-            // 并清空其成员 cellLoc；本轮新建的 Frontier/数字格 cellLoc 恒为空——
-            // 纯揭示世界（assert next != Hidden）下，此处 DFS 访问格必然
-            // loc.component == -1。曾因旧 step2 固定前缀漏扫引发重复归属，动态
-            // 闭包后已闭环（实测有/无该逻辑双变体全语料行为逐位一致）。
+            // 无需"吞并"旧组件：step2 动态闭包已把事件波及的所有组件整块作废并
+            // 清空其成员 cellLoc；纯揭示世界（assert next != Hidden）下，此处
+            // DFS 访问的格子必然 loc.component == -1，重建归属不会重复。
             for (const auto& [cx, cy] : cells) cellHash[cx][cy] = hashAt(cx, cy);
             staged.push_back(buildComponent(cells, state, basic, cellHash, pool));
         }
@@ -461,11 +458,10 @@ inline Structure::Delta Structure::Updater::update(const ObservedBoard& state,
 
     // 3.5 真删除（无墓碑）：降序扫描删标，swap-pop + 重映射 cellLoc，同时把
     //     被删槽位依序写入 delta.removed（"动作轨迹"，天然降序）。
-    //     降序是关键：处理到槽 i 时，所有已标删且 id>i 的组件均已弹出，当前尾部
-    //     必为活组件——无条件重映射"被移动组件"的 cellLoc 才合法（升序会把仍在
-    //     待删队列里的组件当尾部搬走并恢复其成员归属，产生脏 cellLoc）。
-    //     删标是与组件数组平行的临时 removedFlag（update 内部工具）；交换时显式
-    //     把标记随元素迁移（降序下迁入的恒为活组件，标记为 0，迁移仅语义一致）。
+    //     降序是关键：处理到槽 i 时，所有已标删且 id > i 的组件均已弹出，当前
+    //     尾部必为活组件——无条件重映射"被移动组件"的 cellLoc 才合法（升序会把
+    //     仍在待删队列里的组件当尾部搬走并恢复其成员归属，产生脏 cellLoc）。
+    //     交换时删标随元素迁移（降序下迁入的恒为活组件，迁移仅语义一致）。
     {
         int i = static_cast<int>(result.components.size()) - 1;
         while (i >= 0) {
@@ -513,9 +509,9 @@ inline Structure::Delta Structure::Updater::update(const ObservedBoard& state,
             result.cellLoc[static_cast<std::size_t>(c)] = CellLocation{newIdx, -1};
     }
 
-    // 5. 手动清零工作区。清理集 = "dirtyCells（事件邻域 + 被作废成员）"
-    //    ∪ "本轮新建组件实例的成员坐标"——后者就是本次 DFS 的全部访问集
-    //    （frontier → boxes.cells，数字格 → constraintCells），无需另存任何集合。
+    // 5. 清零工作区。清理集 = dirtyCells（事件邻域 + 被作废成员）∪ 本轮新建
+    //    组件实例的成员坐标——后者即本次 DFS 的全部访问集（frontier →
+    //    boxes.cells，数字格 → constraintCells），无需另存任何集合。
     for (const auto& [x, y] : dirtyCells) {
         dirty[x][y] = 0;
         vis[x][y] = 0;
@@ -540,15 +536,14 @@ inline Structure::Delta Structure::Updater::update(const ObservedBoard& state,
     return delta;
 }
 
-// 把 Delta 应用到另一份 Result（搜索树增量重放）。与 update 的结构变更部分
-// 完全等价：delta.removed 是删除动作轨迹（槽位、按执行顺序），依序机械重放
-// （swap-pop + cellLoc 重映射），然后按序追加 addedData。无需排序。
-// 前置：result 必须是产生该 Delta 时的那份状态（从根沿路径应用即满足）。
-// reverse=true：撤销（须恰处于"应用该 delta 后"，LIFO——搜索树游走退出）：
-//   顺序与 apply 相反——先按逆序弹出被追加的 added 组件（清 cellLoc），再
-//   逆序恢复 removed 槽位：把槽位当前组件（apply 时从尾部搬来的）push_back
-//   回尾部并重映射 cellLoc，用 removedData（与 removed 槽位列同序）换回原
-//   组件并回填其 cellLoc。
+// 把 Delta 应用到另一份 Result（搜索树节点增量重放）：与 update 的结构变更
+// 部分完全等价——依序机械重放 delta.removed（swap-pop + cellLoc 重映射），
+// 再按序追加 addedData；无需排序。前置：result 必须是产生该 Delta 时的那份
+// 状态（从根沿路径应用即满足）。reverse=true 为撤销（须恰处于"应用该 delta
+// 后"，LIFO——搜索树游走退出）：顺序与 apply 相反——先按逆序弹出被追加的
+// added 组件（清其 cellLoc），再逆序恢复 removed 槽位：把槽位当前组件
+// （apply 时从尾部搬来的）push_back 回尾部并重映射 cellLoc，用 removedData
+// （与 removed 槽位列同序）换回原组件并回填其 cellLoc。
 inline void Structure::Updater::applyDelta(Result& result, const Delta& delta, bool reverse) {
     if (reverse) {
         for (std::size_t n = delta.addedData.size(); n-- > 0;) {

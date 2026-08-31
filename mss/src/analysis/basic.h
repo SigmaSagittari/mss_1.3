@@ -9,24 +9,23 @@
 namespace mss {
 
 // ─────────────────────────────────────────────────────────────
-// basic.h — 盘面的确定性推理。
+// basic.h — 确定性推理：从数字盘面推出标记分类（Mine/Safe/Frontier/Unknown）。
 //
-// 类型全部嵌套在 Basic 命名空间下，分两类：
-//   数据类（纯数据，无方法）：Mark / Result / Update / Change / Delta
-//   算法类（纯空壳，无成员、零开销）：Analyzer / Updater
+// 类型全部嵌套在 Basic 下，分两类：
+//   数据类（纯数据）：Mark / Result / Update / Delta
+//   算法类（纯空壳）：Analyzer / Updater
 //
-// 职责：
-//   - Analyzer::analyze(board)        全量重建标记（含 Safe 推理，oracle）。
-//   - Updater::update(board, result, updates)
-//                                     增量分析，返回 Delta，不改 result。
-//                                     只做"切割"：标 Mine（数字==周围隐藏数）
-//                                     与 Frontier/Unknown；不标 Safe、不泛洪。
-//                                     翻开格标 Safe = "已揭示"，防止 structure
-//                                     误当 Frontier 污染 box。
-//   - Updater::applyDelta(result, delta)  把 Delta 合入 result。
+// Analyzer::analyze  全量重建标记：Frontier 升级、雷饱和（数字 == 周围隐藏
+//                    数）、安全饱和（数字 == 周围确定雷数）、合法性校验。
+// Updater::update    增量更新：只处理"揭示"事件——被翻格标 Safe（已揭示，
+//                    非推理，防止 structure 误当 Frontier）、邻格
+//                    Unknown→Frontier、数字饱和标 Mine；不标 Safe 推理、
+//                    不泛洪。返回携带 old 值的 Delta，供 applyDelta 撤销/重放。
+// applyDelta         按 Delta 合入 result；reverse=true 逆序撤销。
 //
-// 层间：update 是公共资产，不绑定在数据实例上；Delta 供 undo journal 与
-// UI 增量消费；structure 不消费 Delta，直接读 result 当前状态（吃 DAG）。
+// 层间：update 是公共资产，不绑定在数据实例上；Delta 供搜索树撤销重放
+// （applyDelta reverse）与 UI 增量消费；structure 不消费 Delta，直接读
+// result 当前状态（吃 DAG）。
 // ─────────────────────────────────────────────────────────────
 
 struct Basic {
@@ -83,16 +82,15 @@ struct Basic {
     };
 
     struct Updater {
-        // 增量更新：就地修改 result（只碰受影响格子，无整盘拷贝），
-        // 返回 Delta（含 old 值，供 undo journal 逆序恢复）。
-        // 前置条件：board 已被外部（game/搜索层）更新为揭示后的状态，
-        // updates 说明哪些格子变了、变为什么。
+        // 增量更新：就地修改 result（只碰受影响格子，无整盘拷贝），返回
+        // Delta（含 old 值，供 applyDelta 撤销/重放）。
+        // 前置：board 已被外部（game/搜索层）更新为揭示后的状态，updates
+        // 列出哪些格子变了、变为什么。
         static Delta update(const ObservedBoard& board, Result& result,
                             const std::vector<Update>& updates);
 
-        // 按 Delta 应用标记（标记与统计以 Delta 为准）。
-        // 用于把预先算好的 Delta 落到另一份 result（重放/同步）。
-        // reverse=true：撤销（状态须恰处于"应用该 delta 后"，LIFO）——
+        // 把 Delta 落到另一份 result（重放/同步；标记与统计以 Delta 为准）。
+        // reverse=true 为撤销：状态须恰处于"应用该 delta 后"（LIFO）——
         // 逆序遍历 changes 置回 old，统计恢复应用前值。搜索树游走退出用。
         static void applyDelta(Result& result, const Delta& delta, bool reverse = false);
     };
@@ -110,7 +108,7 @@ inline Basic::Result Basic::Analyzer::analyze(const ObservedBoard& state) {
     const int n = state.rows;
     const int m = state.cols;
 
-    // 1. 初始化：所有未开格标 Unknown。
+    // 1. 初始化：未开格 → Unknown。
     for (int i = 1; i <= n; ++i)
         for (int j = 1; j <= m; ++j)
             if (board[i][j] == Cell::Hidden)
@@ -125,7 +123,7 @@ inline Basic::Result Basic::Analyzer::analyze(const ObservedBoard& state) {
                         result.marks[nx][ny] = Mark::Frontier;
                 });
 
-    // 3. 雷的确定：数字 == 周围未开数量 → 周围都是雷。
+    // 3. 雷饱和：数字 == 周围隐藏数 → 周围全标 Mine。
     for (int i = 1; i <= n; ++i)
         for (int j = 1; j <= m; ++j)
             if (isNumber(board[i][j])) {
@@ -140,7 +138,7 @@ inline Basic::Result Basic::Analyzer::analyze(const ObservedBoard& state) {
                     });
             }
 
-    // 4. 安全的确定：数字 == 周围确定雷数 → 剩余未开格都是安全。
+    // 4. 安全饱和：数字 == 周围已定雷数 → 其余未开格标 Safe。
     for (int i = 1; i <= n; ++i)
         for (int j = 1; j <= m; ++j)
             if (isNumber(board[i][j])) {
@@ -209,9 +207,10 @@ inline Basic::Delta Basic::Updater::update(const ObservedBoard& board,
     };
 
     // 只支持"揭示"类更新（opens 一个隐藏格为数字 0..8）。
-    // 回滚（next == Cell::Hidden）已移除：它会解除数字饱和、在事件第 2 环把
-    // Mine 翻回 Frontier，破坏结构增量更新的"组件原子性"闭包（需两环标脏）。
-    // 纯揭示世界里新标雷必在事件所属组件内，单环（事件+八邻域）即闭环。
+    // 回滚（next == Cell::Hidden）已移除：它会解除数字饱和、把已标 Mine 的
+    // 格翻回 Frontier，需要第二轮传播（两环）才闭环，破坏"组件原子性"——
+    // 纯揭示世界里事件波及范围 = 事件格 + 八邻域（单环），新标雷必在事件
+    // 所属组件内，单环即闭环。
     for (const Update& u : updates)
         assert_(u.next != Cell::Hidden,
                 "Basic::Updater: 不支持回滚更新（next 必须为数字 0..8）");

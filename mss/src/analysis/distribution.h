@@ -18,13 +18,13 @@ namespace mss {
 // ─────────────────────────────────────────────────────────────
 // distribution.h — 连通块的计数与枚举。
 //
-// 只做一件事：把 shape 变成分布表，然后喂给概率引擎。
-//   - forEachAssignment  深分配 DFS：枚举 shape 内 box 雷数组合。
-//   - analyze            汇总分布表（组合 → ways / 每 box 期望），池缓存。
-//   - all_distribute     枚举具体摆放方案（深分配 × 每 box 选格 × T 格补足）。
+// 只做一件事：把 shape 变成分布表，喂给概率引擎。
+//   - forEachAssignment  深分配 DFS：枚举满足约束的 box 雷数组合。
+//   - analyze            汇总分布表（雷数 → ways / 每 box 期望），池缓存。
+//   - all_distribute     枚举具体摆雷方案（深分配 × 每 box 选格 × T 格补足）。
 //
-// 派生统计（mu/sigma2/logWays）、多项式、精确/近似概率、网格物化
-// 全部不归这里——那些是概率引擎拿本层产出去算的下游。
+// 派生统计（mu/sigma2/logWays）、多项式、精确/近似概率、网格物化一律不归
+// 这里——那些是概率引擎拿本层产出去算的下游。
 // ─────────────────────────────────────────────────────────────
 
 struct Distribution {
@@ -41,13 +41,11 @@ struct Distribution {
 
     // ── 池 ──
 
-    // 分布池：Shape 内容哈希 → const Distribution*，只增不删。
-    // 键 = shape.hash（内容指纹，Structure::ShapePool::intern 时写入）：
-    //   同一内容必然同一分布；跨盘面 / 跨 ShapePool 命中也合法——
-    //   哈希相等 ⟹ Shape 内容相等 ⟹ 分布（ways/期望只由内容决定）相等。
-    // 不能用 Shape* 指针做键：指针只在所属 ShapePool 生命周期内稳定，
-    // 跨盘面新建 ShapePool 时堆地址会被 malloc 复用，旧指针命中旧分布，
-    // 导致 Exact::analyze 的 boxProbs 变成 NaN / 值反转（实测污染）。
+    // 分布池：shape.hash（内容指纹）→ const Distribution*，只增不删。
+    // 键 = shape.hash（Structure::ShapePool::intern 时写入）：同内容必同分布，
+    // 跨盘面 / 跨 ShapePool 命中合法。不能用 Shape* 指针做键：指针只在所属
+    // ShapePool 生命周期内稳定，跨盘面新建池时堆地址会被 malloc 复用，旧
+    // 指针误中旧分布（曾导致 Exact::analyze 的 boxProbs 反转污染）。
     struct DistPool {
         const Distribution* get(const Structure::Shape* shape);
         const Distribution* get(const Structure::Shape* shape) const;
@@ -110,7 +108,7 @@ inline const Distribution* Distribution::DistPool::insert(const Structure::Shape
 
 inline long double Distribution::Solver::binom(int n, int k) {
     constexpr int kMax = 9;
-    // 静态 constexpr 局部表，只在此函数内可见。
+    // 编译期查表：静态 constexpr 表（lambda 初始化）。
     static constexpr std::array<std::array<long double, kMax + 1>, kMax + 1> kComb = []() {
         std::array<std::array<long double, kMax + 1>, kMax + 1> t{};
         for (int n = 0; n <= kMax; ++n) {

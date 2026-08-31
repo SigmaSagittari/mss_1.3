@@ -6,7 +6,9 @@
 
 namespace mss {
 
-// 使用 1-based 坐标的二维网格。
+// 二维网格，1-based 坐标（与盘面约定一致）。
+// 存储垫一行一列：(rows+1)×(cols+1)、下标 = x*(cols+1)+y —— 与
+// ObservedBoard::id 的 CellId 布局一致，CellId 可直接作 Grid 的下标。
 template <typename T>
 class Grid {
 public:

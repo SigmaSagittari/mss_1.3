@@ -15,13 +15,12 @@
 namespace mss {
 
 // ─────────────────────────────────────────────────────────────
-// exact.h — 精确概率引擎。
+// exact.h — 精确概率引擎（无近似；残局/根节点的无偏参考实现）。
 //
-// 把每个连通块的分布写成生成函数（Polynomial），乘起来得到所有连通块的
-// 联合分布，再用组合数把"非前沿格"的雷数纳入，得到每个格子的精确雷概率。
-// 无近似、无 rho；是残局/根节点的无偏参考实现。
+// 方法：把每个连通块的分布写成生成函数（Polynomial），相乘得全块联合分布，
+// 再用组合数把"非前沿格"（T 格）的雷数纳入，得到每格的精确雷概率。
 //
-// 内部细节（Polynomial、阶乘表、binom）全部为 Exact 私有，不暴露。
+// 内部细节（Polynomial、阶乘表、combLog）全部为 Exact 私有，不暴露。
 // ─────────────────────────────────────────────────────────────
 
 struct Exact {
@@ -32,11 +31,9 @@ struct Exact {
                                        Distribution::DistPool& pool);
 
     // 观察：点开格子 cell 的结果分布（爆炸概率 + 数字 0..8 概率）。
-    // explosion = prob.mineProbability(cell)（P(x 是雷)，observe 不再自算）；
-    // 已揭示/数字格 → 全 0。
-    // 算法：对每活连通块 forEachAssignment 枚举 box 雷数分配，每分配对
-    // "邻域雷数贡献"做 box 超几何卷积 → 二维块贡献 (h, r)，跨块卷积后
-    // 按 T 格组合补足 → digit[0..8]。
+    // explosion = prob.mineProbability(cell)（P(x 是雷)，observe 不自算雷概率）；
+    // 已揭示/数字格 → 全 0。算法分七步（见实现内注释）：被抓住部分折成
+    // 稀疏转移表做 dp，其余棋盘折成 f[t]，预算卷积后归一化。
     static Probability::ObserveResult observe(const ObservedBoard& board,
                                               const Basic::Result& basic,
                                               const Structure::Result& structure,
@@ -169,7 +166,7 @@ inline Probability::Result Exact::analyze(const ObservedBoard& board,
         const Structure::Instance& inst =
             structure.components[static_cast<std::size_t>(cid)];
         aliveIds.push_back(cid);
-        // 确保分布存在：计算并缓存（同一 shape 幂等命中）。
+        // 取分布（同 shape 幂等命中池缓存）。
         distList.push_back(Distribution::Solver::analyze(*inst.shape, pool));
     }
 
@@ -231,11 +228,12 @@ inline Probability::Result Exact::analyze(const ObservedBoard& board,
 }
 
 // ── observe 实现 ──
-// 方案（纯查询，零修改）：爆炸概率 = prob.mineProbability(cell)，直接取自
-// analyze 的雷概率（已含全局预算卷积），不再自算；这里只算数字分布。
-// 把"被抓住"的部分（x 邻居所属连通块 + x 所在连通块 + T 邻居伪源）预计算成
-// 稀疏转移表 (h, y, w)，dp 逐表卷积得 dp[x][y]（x=邻居雷数，y=被抓住部分雷
-// 数），其余棋盘折成 f[t]（恰有 t 雷的摆法数），预算卷积 y+t=M 后归一化。
+// 纯查询（零修改）：爆炸概率 = prob.mineProbability(cell)，直接取自 analyze
+// 的雷概率（已含全局预算卷积），这里只算数字分布。算法：
+//   把"被抓住部分"（x 邻居所属连通块 ∪ x 所在连通块 ∪ T 邻居伪源）预计算成
+//   稀疏转移表 (h, y, w)（h = 邻域雷数贡献，y = 块雷数，w = 摆法数），
+//   dp 逐表卷积得 dp[x][y]（x = 邻居雷数，y = 被抓住部分雷数）；其余棋盘
+//   折成 f[t]（恰有 t 雷的摆法数）；最后按预算 y+t=M 卷积并归一化。
 inline Probability::ObserveResult Exact::observe(
     const ObservedBoard& board, const Basic::Result& basic,
     const Structure::Result& structure, const Probability::Result& prob,
@@ -248,7 +246,7 @@ inline Probability::ObserveResult Exact::observe(
 
     Probability::ObserveResult out;
 
-    // 边界：已揭示格不可开 → 全 0；basic 已定雷 → explosion=1（无数字）。
+    // 边界：已揭示格不可开 → 全 0；basic 已定雷 → explosion = 1（无数字）。
     if (board.board[x][y] != Cell::Hidden) return out;
     if (basic.marks[x][y] == Mark::Mine) {
         out.explosion = 1.0L;
@@ -260,12 +258,12 @@ inline Probability::ObserveResult Exact::observe(
     const ComponentId xCid = xloc.component;
     const BoxId xBox = xloc.box;
 
-    // ── 步骤 1：被抓住的集合 = 邻居所属连通块 ∪ {x 所在连通块} ∪ T 邻居 ──
+    // ── 步骤 1：被抓住集合 = 邻居所属连通块 ∪ {x 所在连通块} ∪ T 邻居 ──
     // 邻居分类：basic Mine → fixed 源（常数）；Unknown → T 邻居（伪源）；
     //           Frontier → 所属连通块；已揭示数字 / Safe → 无贡献。
-    // x 所在连通块不在此显式加入：x 是 Frontier ⟹ 邻接已揭示数字，且该数字
-    // 属于 x 的连通块（cellLoc 回填），邻居循环必然捕获它；下方断言兜底。
-    // 必须被捕获的原因：x 安全因子（池子 s−1）住在它的 box 转移里。
+    // x 所在连通块不必显式加入：x 是 Frontier ⟹ 邻接已揭示数字，且该数字属于
+    // x 的连通块（cellLoc 回填），邻居循环必然捕获它；下方断言兜底。
+    // 必须捕获它的原因：x 的安全因子（池子 s−1）住在它的 box 转移里。
     int fixed = 0;
     int uT = 0;
     std::vector<ComponentId> captured;
@@ -290,10 +288,10 @@ inline Probability::ObserveResult Exact::observe(
     assert_(!xInBox || seen[static_cast<std::size_t>(xCid)] != 0,
             "Exact::observe: x 所在连通块未被捕获");
 
-    // ── 步骤 2：转移预计算 —— 每个被抓住连通块折成稀疏转移表 ──
+    // ── 步骤 2：转移预计算 —— 每个被抓住连通块折成一张稀疏转移表 ──
     // 每张表是 (h, y, w) 列表：邻域雷数贡献 h、块雷数 y、摆法数 w。
-    // 超几何/box 细节只活在这里；dp 只吃表，不知道 box 语义。
-    // maxY 是 dp 的 y 上限：被抓住部分总格数（T 伪源 u_T 格 + 被抓住各 box
+    // 超几何/box 细节只活在这里，dp 只吃表。
+    // maxY 为 dp 的 y 上限：被抓住部分总格数（T 伪源 u_T 格 + 被抓住各 box
     // 格数）。x 恒非雷（爆炸概率取自 prob），其雷数不进 y。
     struct Transfer {
         int h;  // 邻域雷数贡献
@@ -306,7 +304,7 @@ inline Probability::ObserveResult Exact::observe(
         const Structure::Instance& inst = structure.components[static_cast<std::size_t>(cid)];
         const Structure::Shape& shape = *inst.shape;
         for (const auto& box : shape.boxes) maxY += box.size;
-        // 各 box 与 x 相邻的格数（预计算专用，不外泄）
+        // 各 box 中与 x 相邻的格数（observe 内部预计算用）
         std::vector<int> u(shape.boxes.size(), 0);
         for (std::size_t b = 0; b < shape.boxes.size(); ++b)
             for (std::size_t k = inst.boxes.boxOf[b]; k < inst.boxes.boxOf[b + 1]; ++k) {

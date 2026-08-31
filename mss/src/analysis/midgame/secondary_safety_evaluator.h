@@ -19,40 +19,38 @@ namespace mss {
 //
 // 用法：没有确定安全格时，一行
 //     SecondarySafetyEvaluator::Result r = solve(board, basic, structure, prob, shapePool, pool);
-//     得到推荐格 r.x, r.y（每个候选的细节在 r.candidates）。
+//     得到推荐格 r.x, r.y（候选细节在 r.candidates）。
 //
-// 思路：每个候选格，假装翻开了它，看翻完后局面好不好走，按结果打分。
-//   打分 = 每种翻出数字出现的概率 × 那个新局面的"最好/次好安全度"，
-//   再加一点"翻完还能继续开"的奖励。翻完路好走的格优先点。
+// 思路：对每个候选格，假装翻开它并评估新局面的"可玩性"，按概率加权打分：
+//   打分 = Σ_v P(翻出 v) × 新局面"最好/次好安全度"混合 + "翻完还能继续开"
+//   （progress）奖励——翻完后续好走的格优先点。
 //
-// 来源：Java 版 SecondarySafetyEvaluator（MineSweeperSolver），
-//   删去 50/50 相关部分；参数、行为一律以 Java 版为准。
+// 来源：Java 版 SecondarySafetyEvaluator（MineSweeperSolver）移植；
+//   删去 50/50 相关部分；参数与行为一律以 Java 版为准（实现内保留 Java
+//   方法名便于对照）。
 // ─────────────────────────────────────────────────────────────
 
 struct SecondarySafetyEvaluator {
-    // 参数与 Java 版完全一致（SolverSettings.java 默认值，无同名别的口径）。
+    // 参数与 Java 版完全一致（SolverSettings.java 的默认值）。
     struct Config {
-        // "翻完还能继续开"的格，加分多少。0.001 = 几乎不加分，只在你开的
-        //  分数一模一样时帮你挑一个。做语料 A/B 时才动。
+        // "翻完还能继续开"的加分权重。0.001 ≈ 几乎不加分，只作平分时的
+        //  打破规则；调参实验才动。
         long double progressContribution = 0.001L;
 
-        // 候选窗主门槛：安全度比"最强的活格"低 0.10 以内（注：安全度 =
-        //  1 − 雷概率，这里是两者相减，不是比例；例：最强安全 0.95，则
-        //  安全度 ≥ 0.85 的格全收进来评比）。
+        // 候选窗主门槛：安全度（= 1 − 雷概率）比最强的活格低 0.10 以内都收。
+        //  是差值不是比例：最强安全度 0.95 → 安全度 ≥ 0.85 的格全进候选窗。
         long double selectionThreshold1 = 0.10L;
 
-        // 候选窗兜底线：上面门槛收进来还不到 2 个候选时，把线放宽到
-        //  低 0.20 以内（例：0.95 → ≥ 0.75）多收几个，保证至少有 2 个候选
-        //  可比。注意：是候选太少才放宽，不是候选太多。
+        // 候选窗兜底线：主门槛收进来不足 2 个候选时，放宽到低 0.20 以内
+        //  （0.95 → ≥ 0.75）多收几个，保证至少 2 个候选可比；候选够多时不放宽。
         long double selectionThreshold2 = 0.20L;
 
-        // 候选格所在的"未开连片区域"小于 8 格 → 排到后面，先评估大区域的格
-        //  （点开大区域容易翻 0、连锁展开，收益高）。全部候选都在小区域时才
-        //  轮到它们。8 = 格子个数。
+        // 候选所在"未开连片区域"少于该格数 → 排后评估（点开大区域易翻 0、
+        //  连锁展开，收益高）；全部候选都在小区域时才轮到它们。
         int spaceThreshold = 8;
 
         // "翻成数字 v 后的新局面"用什么数代表：最好的格 ×4 + 次好的格 ×1，
-        //  除以 5。改它 = 改对"后续最优格"的信任配比，一般不用动。
+        //  除以 5。改它 = 改对"后续最优格"的信任配比，一般不动。
         int weight1 = 4;
         int weight2 = 1;
         Config() = default;
@@ -82,10 +80,10 @@ struct SecondarySafetyEvaluator {
     };
 
     // 求解一次：候选窗 → 逐格评估 → 剪枝 → 返回分数最高的格。
-    // prob 必须是同一局面的 Probability::Result。
-    // shapePool：评估中会临时揭示格子、产生新形状，必须 intern（同 Structure::Updater）。
-    // config 必传（Config{} 即全部默认；带类内默认成员初始化器的类型不支持
-    //   = Config{} 形式的默认参数，这是 C++ 规则）。
+    // prob 必须是同一局面的 Probability::Result；shapePool 供评估中临时
+    // 揭示产生的新形状 intern（同 Structure::Updater）。
+    // config 必传（Config{} 即全默认；带类内默认成员初始化器的类型不支持
+    //   = Config{} 形式的默认参数，C++ 规则所致）。
     static Result solve(const ObservedBoard& board, const Basic::Result& basic,
                         const Structure::Result& structure,
                         const Probability::Result& prob,
@@ -105,8 +103,8 @@ private:
                                       const Config& config);
 
     // 局面里"确定安全盒"的总格数（Java getClearCount；Java 的
-    //   livingClearCount 还要排除死格，这里用全量——只影响 progressProb 的
-    //   阈值比较，语料 A/B 验证差异）。
+    //   livingClearCount 还排除死格，这里用全量——只影响 progressProb 的
+    //   阈值比较）。
     static long double clearCount(const Probability::Result& p,
                                   const Structure::Result& s);
 
@@ -183,7 +181,7 @@ inline SecondarySafetyEvaluator::Result::Candidate SecondarySafetyEvaluator::eva
     out.y = y;
     out.safety = 1.0L - prob.mineProbability(cell, board, basic, structure);
 
-    // ── 预检：x 必空局面（x 标 Safe，不动 board、不引入 witness）──
+    // ── 预检：x 必空局面（x 临时标 Safe；不动 board）──
     Basic::Result bSafe = basic;
     {
         Mark& m = bSafe.marks[x][y];
@@ -197,8 +195,9 @@ inline SecondarySafetyEvaluator::Result::Candidate SecondarySafetyEvaluator::eva
     // 预检必清数（Java linkedTilesCount；x 已不在任何池子，自然不含 x）。
     const long double linkedClears = clearCount(pSafe, sSafe);
 
-    // ── 支配快速路径（Java L258-270）：存在不含 x 且格数 > 1 的安全盒 → 简化评分。
-    // x 标 Safe 后不属任何组件，故任一大小 > 1 的 0 概率盒都满足"不含 x"。
+    // ── 支配快速路径（Java doFullEvaluateTile 同款）：存在格数 > 1 的安全盒
+    //    → 简化评分。x 标 Safe 后不属任何组件，故任一大小 > 1 的 0 概率盒
+    //    都满足"不含 x"。
     bool dominated = false;
     for (std::size_t cid = 0; cid < pSafe.components.size() && !dominated; ++cid) {
         const auto& cr = pSafe.components[cid];
@@ -233,7 +232,8 @@ inline SecondarySafetyEvaluator::Result::Candidate SecondarySafetyEvaluator::eva
     bool allVHaveSafeBox = true;  // certainProgress 的近似：每个正概率 v 都有安全盒
 
     for (int v = minMines; v <= maxMines; ++v) {
-        // 乐观上界剪枝（Java L353-363）：剩余概率全按 100% 安全也追不上第一名。
+        // 乐观上界剪枝（Java doFullEvaluateTile 同款）：剩余概率全按 100%
+        // 安全也追不上第一名。
         const long double progressBonus =
             1.0L + (out.progressProb + safetyThisTileLeft) * config.progressContribution;
         const long double optimistic =
