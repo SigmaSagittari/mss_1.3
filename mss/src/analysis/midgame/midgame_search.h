@@ -31,8 +31,8 @@ namespace mss {
 // 状态传递（结构"搜索树节点增量重放"，见 structure.h）：
 //   节点不存完整棋盘；每个招法节点存三样增量（父状态 → 本状态）：
 //     reveal           揭示事件（board 差异 = 单格赋值）
-//     Basic::Delta     Basic::Updater::update 的产物
-//     Structure::Delta Structure::Updater::update 的产物
+//     Basic::Delta     Basic::update 的产物
+//     Structure::Delta Structure::update 的产物
 //   游走 = 一次 DFS 维护单份路径状态：进子节点 = 应用 reveal 与两个 Delta
 //   （applyDelta）；退出 = 撤销（applyDelta(reverse=true)，LIFO）——不再
 //   每叶从根重放、不拷贝整盘。可逆性依据：board 写回 Hidden；
@@ -80,12 +80,12 @@ struct MidgameSearch {
         // 招法节点（局面）：值 = H0（叶子）/ max V̂（已展开）/ 1（终盘）。
         struct Position {
             Position* parent = nullptr;       // 父招法节点（根 = nullptr）
-            Basic::Update reveal;             // 相对父的揭示事件（根：cell = -1，无事件）
+            Basic::Delta::updateCell reveal;  // 相对父的揭示事件（根：cell = -1，无事件）
             int depth = 0;                    // 深度（= 沿路径的揭示数，同步于轮数）
             int unopened = 0;                 // 本局面未开格数（终止性上界 U−M 用）
             int mines = 0;                    // 本局面剩余雷数
 
-            // 增量（父状态 → 本状态；创建时由 Updater::update 就地算好）。
+            // 增量（父状态 → 本状态；创建时由 update 就地算好）。
             // 沿路径逐个 applyDelta 即得本局面完整状态；纯算术，不扣预算。
             Basic::Delta basicDelta;
             Structure::Delta structureDelta;

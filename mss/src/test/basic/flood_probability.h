@@ -103,7 +103,7 @@ inline void testBasicFloodProbability(
             const Basic::Result& floodBasic = snapshot.analysis.basic;
             Structure::ShapePool shapes;
             const Structure::Result legacyStructure =
-                Structure::Analyzer::analyze(board, legacyBasic, shapes);
+                Structure::analyze(board, legacyBasic, shapes);
             Distribution::DistPool distributions;
             const Probability::Result probability =
                 Exact::analyze(board, legacyBasic, legacyStructure, distributions);

@@ -25,10 +25,10 @@ namespace mss {
 // 类型（全部嵌套在 Structure 下）：
 //   数据类  Shape / Instance / Result / Delta
 //   池      ShapePool（按 hash 去重，只增不删，Shape 地址稳定）
-//   算法类  Analyzer（全量）/ Updater（增量，就地改 Result 只碰脏块，
+//   算法     analyze（全量）/ update（增量，就地改 Result 只碰脏块，
 //           返回 Delta 供搜索树增量重放/撤销，不做墓碑式保留）
 //
-// 层间：Analyzer/Updater 吃 DAG——直接读 board + Basic::Result 的当前状态，
+// 层间：分析接口吃 DAG——直接读 board + Basic::Result 的当前状态，
 // 而非只吃上层 delta。
 // ─────────────────────────────────────────────────────────────
 
@@ -112,29 +112,20 @@ struct Structure {
         FlatHashTable<U128, ShapeId, U128Hash> index_;
     };
 
-    // ── 算法类 ──
+    // 全量构建：从 board + basic 标记推导全部连通块，intern 形状，写回 cellLoc。
+    static Result analyze(const ObservedBoard& board, const Basic::Result& basic,
+                          ShapePool& pool);
 
-    struct Analyzer {
-        // 全量构建：从 board + basic 标记推导全部连通块，intern 形状，写回 cellLoc。
-        static Result analyze(const ObservedBoard& board, const Basic::Result& basic,
-                              ShapePool& pool);
-    };
+    // 增量更新：就地改 result（只碰受影响连通块，无整盘拷贝）。前置：board 与
+    // basic 已被外部更新为揭示后的状态，updates 列出变化的格子（定位脏区）。
+    static Delta update(const ObservedBoard& board, const Basic::Result& basic,
+                        Result& result, ShapePool& pool, const Basic::Delta& updates);
 
-    struct Updater {
-        // 增量更新：就地改 result（只碰受影响连通块，无整盘拷贝）。
-        // 前置：board 与 basic 已被外部更新为揭示后的状态，updates 列出变化
-        // 的格子（定位脏区）。
-        static Delta update(const ObservedBoard& board, const Basic::Result& basic,
-                            Result& result, ShapePool& pool,
-                            const std::vector<Basic::Update>& updates);
-        
-        // 把 Delta 应用到另一份 Result（搜索树节点增量重放，从根沿路径逐个
-        // 应用即得节点状态）。等价于 update 的结构变更部分，不触碰
-        // board/basic（由调用方保持同步）。reverse=true 为撤销（LIFO）：
-        // 先弹出被追加的 added 组件，再用 removedData 逆序换回被删组件。
-        // 搜索树游走退出用。
-        static void applyDelta(Result& result, const Delta& delta, bool reverse = false);
-    };
+    // 把 Delta 应用到另一份 Result（搜索树节点增量重放，从根沿路径逐个应用
+    // 即得节点状态）。等价于 update 的结构变更部分，不触碰 board/basic（由调用方
+    // 保持同步）。reverse=true 为撤销（LIFO）：先弹出被追加的 added 组件，再用
+    // removedData 逆序换回被删组件。搜索树游走退出用。
+    static void applyDelta(Result& result, const Delta& delta, bool reverse = false);
 
     // ── 实现区 ──
 
@@ -166,9 +157,9 @@ inline const Structure::Shape* Structure::ShapePool::intern(Shape shape) {
     return shapes_[static_cast<std::size_t>(id)].get();
 }
 
-inline Structure::Result Structure::Analyzer::analyze(const ObservedBoard& state,
-                                                      const Basic::Result& basic,
-                                                      ShapePool& pool) {
+inline Structure::Result Structure::analyze(const ObservedBoard& state,
+                                            const Basic::Result& basic,
+                                            ShapePool& pool) {
     using Mark = Basic::Mark;
     const int rows = state.rows;
     const int cols = state.cols;
@@ -341,10 +332,10 @@ inline U128 Structure::computeHash(const Shape& shape) {
     return h.finalize();
 }
 
-inline Structure::Delta Structure::Updater::update(const ObservedBoard& state,
-                                                   const Basic::Result& basic,
-                                                   Result& result, ShapePool& pool,
-                                                   const std::vector<Basic::Update>& updates) {
+inline Structure::Delta Structure::update(const ObservedBoard& state,
+                                          const Basic::Result& basic,
+                                          Result& result, ShapePool& pool,
+                                          const Basic::Delta& updates) {
     using Mark = Basic::Mark;
     Delta delta;
     const int rows = state.rows;
@@ -403,10 +394,10 @@ inline Structure::Delta Structure::Updater::update(const ObservedBoard& state,
     //    内（组件原子性闭环）、新 Frontier 必在八邻域内，单环即闭环。
     //    回滚更新（next==Hidden）已移除——它会在第二轮传播里解除 Mine 标记、
     //    把本是 Mine 的格翻回 Frontier，需要两环标脏才能覆盖。
-    for (const Basic::Update& u : updates)
+    for (const Basic::Delta::updateCell& u : updates.upd)
         assert_(u.next != Cell::Hidden,
-                "Structure::Updater: 不支持回滚更新（next 必须为数字 0..8）");
-    for (const Basic::Update& u : updates) {
+                "Structure::update: 不支持回滚更新（next 必须为数字 0..8）");
+    for (const Basic::Delta::updateCell& u : updates.upd) {
         const auto [x, y] = state.pos(u.cell);
         markDirty(x, y);
         forEachAdjacent(x, y, rows, cols, [&](int nx, int ny) { markDirty(nx, ny); });
@@ -544,7 +535,7 @@ inline Structure::Delta Structure::Updater::update(const ObservedBoard& state,
 // added 组件（清其 cellLoc），再逆序恢复 removed 槽位：把槽位当前组件
 // （apply 时从尾部搬来的）push_back 回尾部并重映射 cellLoc，用 removedData
 // （与 removed 槽位列同序）换回原组件并回填其 cellLoc。
-inline void Structure::Updater::applyDelta(Result& result, const Delta& delta, bool reverse) {
+inline void Structure::applyDelta(Result& result, const Delta& delta, bool reverse) {
     if (reverse) {
         for (std::size_t n = delta.addedData.size(); n-- > 0;) {
             const Instance& victim = result.components.back();

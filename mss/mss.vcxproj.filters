@@ -31,6 +31,9 @@
     <Filter Include="头文件\analysis\midgame">
       <UniqueIdentifier>{864c8bc3-9f09-42b1-87ec-fdfc2f40d623}</UniqueIdentifier>
     </Filter>
+    <Filter Include="头文件\analysis\distribution">
+      <UniqueIdentifier>{44635143-09b8-468b-8d86-412ccb8d9002}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\core\types.h">
@@ -60,9 +63,6 @@
     <ClInclude Include="src\analysis\basic.h">
       <Filter>头文件\analysis</Filter>
     </ClInclude>
-    <ClInclude Include="src\analysis\distribution.h">
-      <Filter>头文件\analysis</Filter>
-    </ClInclude>
     <ClInclude Include="src\analysis\structure.h">
       <Filter>头文件\analysis</Filter>
     </ClInclude>
@@ -81,12 +81,15 @@
     <ClInclude Include="src\analysis\midgame\secondary_safety_evaluator.h">
       <Filter>头文件\analysis\midgame</Filter>
     </ClInclude>
+    <ClInclude Include="src\analysis\distribution\distribution_graphv.h">
+      <Filter>头文件\analysis\distribution</Filter>
+    </ClInclude>
+    <ClInclude Include="src\analysis\distribution\distribution.h">
+      <Filter>头文件\analysis\distribution</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\mss_1.2.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="src\test\harness.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>

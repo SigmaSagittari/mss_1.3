@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "analysis/basic.h"
-#include "analysis/distribution.h"
+#include "analysis/distribution/distribution.h"
 #include "analysis/probability/exact.h"
 #include "analysis/structure.h"
 
@@ -135,7 +135,7 @@ struct Game {
         forEachAdjacent(x, y, board.rows, board.cols, [&](int nx, int ny) { total += mine(nx, ny); });
         return total;
     }
-    bool reveal(int x, int y, std::vector<Basic::Update>& updates) {
+    bool reveal(int x, int y, Basic::Delta& updates) {
         if (mine(x, y)) return false;
         // 翻出 0 则连锁泛洪（BFS 展开整个空区）。
         std::deque<std::pair<int, int>> pending{{x, y}};
@@ -144,7 +144,8 @@ struct Game {
             if (board.board[cx][cy] != Cell::Hidden || mine(cx, cy)) continue;
             const int digit = adjacentMines(cx, cy);
             board.board[cx][cy] = static_cast<Cell>(digit); ++opened;
-            updates.push_back(Basic::Update{board.id(cx, cy), static_cast<Cell>(digit)});
+            updates.upd.push_back(
+                Basic::Delta::updateCell{board.id(cx, cy), static_cast<Cell>(digit)});
             if (digit == 0) forEachAdjacent(cx, cy, board.rows, board.cols,
                 [&](int nx, int ny) { pending.emplace_back(nx, ny); });
         }
@@ -159,13 +160,13 @@ struct Analysis {
     Structure::Result structure;
     Distribution::DistPool distributions;
     Probability::Result probability;
-    explicit Analysis(const ObservedBoard& b) : basic(Basic::Analyzer::analyze(b)),
-        structure(Structure::Analyzer::analyze(b, basic, shapes)),
+    explicit Analysis(const ObservedBoard& b) : basic(Basic::analyze(b)),
+        structure(Structure::analyze(b, basic, shapes)),
         probability(Exact::analyze(b, basic, structure, distributions)) {}
 
-    void update(const ObservedBoard& board, const std::vector<Basic::Update>& updates) {
-        Basic::Updater::update(board, basic, updates);
-        Structure::Updater::update(board, basic, structure, shapes, updates);
+    void update(const ObservedBoard& board, const Basic::Delta& updates) {
+        Basic::update(board, basic, updates);
+        Structure::update(board, basic, structure, shapes, updates);
         probability = Exact::analyze(board, basic, structure, distributions);
     }
 };
@@ -193,13 +194,13 @@ inline void generateGame(const TestConfig& config, Rng& rng, Fn&& consume) {
     for (int restart = 0; restart < config.maxRestarts; ++restart) {
         Game game(config); game.placeMines(rng, config.firstMoveSafe); bool lost = false;
         if (config.firstMoveSafe) {
-            std::vector<Basic::Update> firstMove;
+            Basic::Delta firstMove;
             game.reveal(1, 1, firstMove);
         }
         Analysis analysis(game.board);
         while (!game.won()) {
             const Move move = lowestRiskMove(game.board, analysis);
-            std::vector<Basic::Update> updates;
+            Basic::Delta updates;
             if (move.x == 0 || !game.reveal(move.x, move.y, updates)) { lost = true; break; }
             if (game.won()) break;
             analysis.update(game.board, updates);

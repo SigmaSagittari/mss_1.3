@@ -74,7 +74,7 @@ struct SecondarySafetyEvaluator {
 
     // 求解一次：候选窗 → 逐格评估 → 剪枝 → 返回分数最高的格。
     // prob 必须是同一局面的 Probability::Result；shapePool 供评估中临时
-    // 揭示产生的新形状 intern（同 Structure::Updater）。
+    // 揭示产生的新形状 intern（同 Structure::update）。
     // config 必传（Config{} 即全默认；带类内默认成员初始化器的类型不支持
     //   = Config{} 形式的默认参数，C++ 规则所致）。
     // 求解期间会通过 Delta 临时修改 board / basic / structure，并在返回前恢复。
@@ -157,8 +157,9 @@ inline SecondarySafetyEvaluator::Result::Candidate SecondarySafetyEvaluator::eva
     const Probability::ObserveResult observation =
         Exact::observe(board, basic, structure, prob, pool, cell);
     out.safety = 1.0L - observation.explosion;
-    std::vector<Basic::Update> updates(1);
-    updates[0].cell = cell;
+    Basic::Delta updates;
+    updates.upd.resize(1);
+    updates.upd[0].cell = cell;
 
     long double secondarySafety = 0;
     long double progressProb = 0;
@@ -182,10 +183,10 @@ inline SecondarySafetyEvaluator::Result::Candidate SecondarySafetyEvaluator::eva
 
         // 临时局面：就地揭示 x=v，随后由 Delta 回滚。
         board.board[x][y] = static_cast<Cell>(v);
-        updates[0].next = static_cast<Cell>(v);
-        const Basic::Delta basicDelta = Basic::Updater::update(board, basic, updates);
+        updates.upd[0].next = static_cast<Cell>(v);
+        const Basic::Delta basicDelta = Basic::update(board, basic, updates);
         const Structure::Delta structureDelta =
-            Structure::Updater::update(board, basic, structure, shapePool, updates);
+            Structure::update(board, basic, structure, shapePool, updates);
         Probability::Result pv = Exact::analyze(board, basic, structure, pool);
 
         const FrontierSummary summary = summarizeFrontier(pv, board, structure, config);
@@ -195,8 +196,8 @@ inline SecondarySafetyEvaluator::Result::Candidate SecondarySafetyEvaluator::eva
         if (summary.clears > 0.0L) progressProb += probV;
         safetyThisTileLeft -= probV;
 
-        Structure::Updater::applyDelta(structure, structureDelta, true);
-        Basic::Updater::applyDelta(basic, basicDelta, true);
+        Structure::applyDelta(structure, structureDelta, true);
+        Basic::applyDelta(basic, basicDelta, true);
         board.board[x][y] = Cell::Hidden;
     }
 

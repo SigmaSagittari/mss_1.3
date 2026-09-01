@@ -12,20 +12,20 @@ namespace mss {
 // basic.h — 确定性推理：从数字盘面推出标记分类（Mine/Safe/Frontier/Unknown）。
 //
 // 类型全部嵌套在 Basic 下，分两类：
-//   数据类（纯数据）：Mark / Result / Update / Delta
-//   算法类（纯空壳）：Analyzer / Updater
+//   数据类（纯数据）：Mark / Result / Delta
 //
-// Analyzer::analyze  全量重建标记：Frontier 升级后，以数字格为起点泛洪，
+// analyze            全量重建标记：Frontier 升级后，以数字格为起点泛洪，
 //                    反复执行雷/安全饱和直至无新结论，再做合法性校验。
-// Updater::update    增量更新：只处理"揭示"事件——被翻格标 Safe（已揭示，
+// update             增量更新：只处理"揭示"事件——被翻格标 Safe（已揭示，
 //                    非推理，防止 structure 误当 Frontier）、邻格
 //                    Unknown→Frontier；再由受影响数字格开始泛洪推导 Mine / Safe。
 //                    返回携带 old 值的 Delta，供 applyDelta 撤销/重放。
 // applyDelta         按 Delta 合入 result；reverse=true 逆序撤销。
 //
-// 层间：update 是公共资产，不绑定在数据实例上；Delta 供搜索树撤销重放
-// （applyDelta reverse）与 UI 增量消费；structure 不消费 Delta，直接读
-// result 当前状态（吃 DAG）。
+// 层间：update 是公共资产，不绑定在数据实例上；Delta 同时携带原始事件与
+// 推导出的标记变化，供搜索树撤销重放
+// （applyDelta reverse）与 UI 增量消费；structure 从 Delta::upd 取脏区，
+// 并直接读 result 当前状态（吃 DAG）。
 // ─────────────────────────────────────────────────────────────
 
 struct Basic {
@@ -49,15 +49,15 @@ struct Basic {
         bool valid = true;   // 是否出现矛盾（无解）
     };
 
-    // 值事件：格子被翻开（next = 数字 0..8）或覆盖（next = Hidden）。
-    struct Update {
-        CellId cell = -1;
-        Cell next = Cell::Hidden;
-    };
-
-
-    // 增量分析结果：变化集合 + 应用后的统计。
+    // 增量：原始揭示事件、标记变化集合与应用后的统计。
     struct Delta {
+        // 值事件：格子被翻开（next = 数字 0..8）或覆盖（next = Hidden）。
+        struct updateCell {
+            CellId cell = -1;
+            Cell next = Cell::Hidden;
+        };
+        std::vector<updateCell> upd;
+
         // 单格标记变化。old 供 rollback 逆序恢复。
         struct Change {
             CellId cell = -1;
@@ -74,31 +74,23 @@ struct Basic {
         bool oldValid = true;
     };
 
-    // ── 算法类 ──
+    // 全量重建（首次初始化或需要重新对齐时）。
+    static Result analyze(const ObservedBoard& board);
 
-    struct Analyzer {
-        // 全量重建（首次初始化或需要重新对齐时）。
-        static Result analyze(const ObservedBoard& board);
-    };
+    // 增量更新：就地修改 result（只碰受影响格子，无整盘拷贝），返回
+    // Delta（含 old 值，供 applyDelta 撤销/重放）。前置：board 已被外部
+    // （game/搜索层）更新为揭示后的状态，updates 列出哪些格子变了、变为什么。
+    static Delta update(const ObservedBoard& board, Result& result, const Delta& updates);
 
-    struct Updater {
-        // 增量更新：就地修改 result（只碰受影响格子，无整盘拷贝），返回
-        // Delta（含 old 值，供 applyDelta 撤销/重放）。
-        // 前置：board 已被外部（game/搜索层）更新为揭示后的状态，updates
-        // 列出哪些格子变了、变为什么。
-        static Delta update(const ObservedBoard& board, Result& result,
-                            const std::vector<Update>& updates);
-
-        // 把 Delta 落到另一份 result（重放/同步；标记与统计以 Delta 为准）。
-        // reverse=true 为撤销：状态须恰处于"应用该 delta 后"（LIFO）——
-        // 逆序遍历 changes 置回 old，统计恢复应用前值。搜索树游走退出用。
-        static void applyDelta(Result& result, const Delta& delta, bool reverse = false);
-    };
+    // 把 Delta 落到另一份 result（重放/同步；标记与统计以 Delta 为准）。
+    // reverse=true 为撤销：状态须恰处于"应用该 delta 后"（LIFO）——逆序
+    // 遍历 changes 置回 old，统计恢复应用前值。搜索树游走退出用。
+    static void applyDelta(Result& result, const Delta& delta, bool reverse = false);
 };
 
 // ── 实现区 ──
 
-inline Basic::Result Basic::Analyzer::analyze(const ObservedBoard& state) {
+inline Basic::Result Basic::analyze(const ObservedBoard& state) {
     using Mark = Basic::Mark;
     Result result;
     result.rows = state.rows;
@@ -187,11 +179,11 @@ inline Basic::Result Basic::Analyzer::analyze(const ObservedBoard& state) {
     return result;
 }
 
-inline Basic::Delta Basic::Updater::update(const ObservedBoard& board,
-                                           Result& result,
-                                           const std::vector<Update>& updates) {
+inline Basic::Delta Basic::update(const ObservedBoard& board, Result& result,
+                                  const Delta& updates) {
     using Mark = Basic::Mark;
     Delta delta;
+    delta.upd = updates.upd;
     delta.oldUnknownSum = result.unknownSum;
     delta.oldMineSum = result.mineSum;
     delta.oldValid = result.valid;
@@ -220,11 +212,11 @@ inline Basic::Delta Basic::Updater::update(const ObservedBoard& board,
     // 回滚（next == Cell::Hidden）已移除：它会解除数字饱和、把已标 Mine 的
     // 格翻回 Frontier，需要第二轮传播（两环）才闭环，破坏"组件原子性"——
     // 纯揭示世界里标记只会单调收敛，数字格队列可将其影响泛洪到整个相关组件。
-    for (const Update& u : updates)
+    for (const Delta::updateCell& u : updates.upd)
         assert_(u.next != Cell::Hidden,
-                "Basic::Updater: 不支持回滚更新（next 必须为数字 0..8）");
+                "Basic::update: 不支持回滚更新（next 必须为数字 0..8）");
 
-    for (const Update& u : updates) {
+    for (const Delta::updateCell& u : updates.upd) {
         const auto [x, y] = board.pos(u.cell);
 
         // 翻开数字：被翻格标 Safe（已揭示，非推理），邻居隐藏格接入前沿。
@@ -268,7 +260,7 @@ inline Basic::Delta Basic::Updater::update(const ObservedBoard& board,
     return delta;
 }
 
-inline void Basic::Updater::applyDelta(Result& result, const Delta& delta, bool reverse) {
+inline void Basic::applyDelta(Result& result, const Delta& delta, bool reverse) {
     if (reverse) {
         // 撤销：逆序回放标记（同格多次变化时逆序回退整链），统计恢复应用前值。
         for (std::size_t i = delta.changes.size(); i-- > 0;) {
