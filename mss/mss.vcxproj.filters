@@ -81,7 +81,7 @@
     <ClInclude Include="src\analysis\midgame\secondary_safety_evaluator.h">
       <Filter>头文件\analysis\midgame</Filter>
     </ClInclude>
-    <ClInclude Include="src\analysis\distribution\distribution_graphv.h">
+    <ClInclude Include="src\analysis\distribution\distribution_graph.h">
       <Filter>头文件\analysis\distribution</Filter>
     </ClInclude>
     <ClInclude Include="src\analysis\distribution\distribution.h">

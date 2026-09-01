@@ -1,3 +1,3 @@
 #include "test/harness.cpp"
 
-#include "analysis/distribution/distribution_graphv.h"
+#include "analysis/distribution/distribution_graph.h"

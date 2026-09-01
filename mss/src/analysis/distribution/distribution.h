@@ -81,6 +81,7 @@ struct Distribution {
         // 组合数 C(n,k)：编译时查表。box 规模 ≤ 8（同一数字邻域集合的隐藏格
         // 都在该组任一数字的 8 邻域内）。
         static long double binom(int n, int k);
+
     };
 };
 
@@ -123,7 +124,7 @@ inline long double Distribution::Solver::binom(int n, int k) {
     }();
 
     // 调用方（forEachAssignment）保证 0<=k<=n<=box.size<=kMax；越界=结构 bug。
-    assert_(k >= 0 && k <= n && n <= kMax, "Distribution::Solver::binom: 参数越界");
+    assert_(k >= 0 && k <= n && n <= kMax, "Distribution::binom: 参数越界");
     return kComb[static_cast<std::size_t>(n)][static_cast<std::size_t>(k)];
 }
 

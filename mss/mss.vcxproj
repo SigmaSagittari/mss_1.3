@@ -150,7 +150,7 @@
     <ClInclude Include="src\analysis\basic.h" />
     <ClInclude Include="src\analysis\bruteforce\endgame_bruteforce.h" />
     <ClInclude Include="src\analysis\distribution\distribution.h" />
-    <ClInclude Include="src\analysis\distribution\distribution_graphv.h" />
+    <ClInclude Include="src\analysis\distribution\distribution_graph.h" />
     <ClInclude Include="src\analysis\midgame\midgame_search.h" />
     <ClInclude Include="src\analysis\midgame\secondary_safety_evaluator.h" />
     <ClInclude Include="src\analysis\probability\exact.h" />

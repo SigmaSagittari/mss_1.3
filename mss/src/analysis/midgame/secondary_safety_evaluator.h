@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "analysis/basic.h"
-#include "analysis/distribution.h"
+#include "analysis/distribution/distribution.h"
 #include "analysis/probability/exact.h"
 #include "analysis/probability/probability.h"
 #include "analysis/structure.h"
