@@ -19,7 +19,7 @@ public:
     void resize(int rows, int cols, const T& value) {
         rows_ = rows;
         cols_ = cols;
-        data_.assign(static_cast<std::size_t>(rows + 1) * (cols + 1), value);
+        data_.assign((rows + 1) * (cols + 1), value);
     }
 
     void fill(const T& value) { std::fill(data_.begin(), data_.end(), value); }
@@ -60,7 +60,7 @@ public:
 
 private:
     std::size_t index(int x, int y) const {
-        return static_cast<std::size_t>(x) * (cols_ + 1) + y;
+        return x * (cols_ + 1) + y;
     }
 
     int rows_ = 0;

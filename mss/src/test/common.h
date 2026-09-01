@@ -117,18 +117,18 @@ struct Game {
     std::vector<char> mines;
     int opened = 0;
     explicit Game(const TestConfig& c) : board(c.rows, c.cols, c.mines),
-        mines(static_cast<std::size_t>(c.rows * c.cols), 0) {}
+        mines(c.rows * c.cols, 0) {}
     int flat(int x, int y) const { return (x - 1) * board.cols + (y - 1); }
-    bool mine(int x, int y) const { return mines[static_cast<std::size_t>(flat(x, y))] != 0; }
+    bool mine(int x, int y) const { return mines[flat(x, y)] != 0; }
     void placeMines(Rng& rng, bool firstMoveSafe) {
-        std::vector<int> cells(static_cast<std::size_t>(board.rows * board.cols));
+        std::vector<int> cells(board.rows * board.cols);
         const int first = firstMoveSafe ? 1 : 0;
         for (int i = first; i < static_cast<int>(cells.size()); ++i)
-            cells[static_cast<std::size_t>(i - first)] = i;
+            cells[i - first] = i;
         cells.resize(cells.size() - first);
         for (int i = static_cast<int>(cells.size()) - 1; i > 0; --i)
-            std::swap(cells[static_cast<std::size_t>(i)], cells[static_cast<std::size_t>(rng.below(i + 1))]);
-        for (int i = 0; i < board.totalMines; ++i) mines[static_cast<std::size_t>(cells[i])] = 1;
+            std::swap(cells[i], cells[rng.below(i + 1)]);
+        for (int i = 0; i < board.totalMines; ++i) mines[cells[i]] = 1;
     }
     int adjacentMines(int x, int y) const {
         int total = 0;

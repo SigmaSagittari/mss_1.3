@@ -75,15 +75,15 @@ inline long double Probability::Result::mineProbability(
     CellId cell, const ObservedBoard& board, const Basic::Result& basic,
     const Structure::Result& structure) const {
     const auto [x, y] = board.pos(cell);
-    const CellLocation loc = structure.cellLoc[static_cast<std::size_t>(cell)];
+    const CellLocation loc = structure.cellLoc[cell];
     if (loc.component == -1) {
         if (basic.marks[x][y] == Basic::Mark::Mine) return 1.0L;
         if (basic.marks[x][y] == Basic::Mark::Unknown) return tCellProbability;
         return 0.0L;  // Safe / 已揭示数字
     }
     if (loc.box == -1) return 0.0L;  // 约束数字格（已揭示）
-    return Probability::limitProbability(components[static_cast<std::size_t>(loc.component)].boxProbs[
-        static_cast<std::size_t>(loc.box)]);
+    return Probability::limitProbability(components[loc.component].boxProbs[
+        loc.box]);
 }
 
 template <typename Callback>
@@ -93,11 +93,11 @@ inline void Probability::Result::frontierCells(
     // 按块枚举：components 下标 = ComponentId，与 structure.components 对齐；
     // boxProbs 的取值路径与 mineProbability 相同（均摊单格概率）。
     for (std::size_t cid = 0; cid < components.size(); ++cid) {
-        const ComponentResult& cr = components[static_cast<std::size_t>(cid)];
+        const ComponentResult& cr = components[cid];
         const Structure::Instance& inst =
-            structure.components[static_cast<std::size_t>(cid)];
+            structure.components[cid];
         for (std::size_t b = 0; b < cr.boxProbs.size(); ++b) {
-            const long double prob = cr.boxProbs[static_cast<std::size_t>(b)];
+            const long double prob = cr.boxProbs[b];
             for (std::size_t k = inst.boxes.boxOf[b]; k < inst.boxes.boxOf[b + 1]; ++k) {
                 const auto [x, y] = board.pos(inst.boxes.cells[k]);  // 同 mineProbability 反解
                 callback(x, y, prob);

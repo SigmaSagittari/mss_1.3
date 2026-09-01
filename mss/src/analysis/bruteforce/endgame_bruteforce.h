@@ -105,7 +105,7 @@ private:
 
         Layer& layer(int depth) {
             if (static_cast<int>(layers_.size()) <= depth) layers_.emplace_back();
-            return layers_[static_cast<std::size_t>(depth)];
+            return layers_[depth];
         }
 
         void reset() {
@@ -160,7 +160,7 @@ inline EndgameBruteforce::Result EndgameBruteforce::solveEndgame(
     s.nodes = 0;
     s.opened.assign(s.candidates.size(), 0);
 
-    std::vector<int> allConfigs(static_cast<std::size_t>(s.mineConfigs.size()));
+    std::vector<int> allConfigs(s.mineConfigs.size());
     for (int i = 0; i < static_cast<int>(allConfigs.size()); ++i) allConfigs[i] = i;
 
     scratch.reset();
@@ -193,7 +193,7 @@ inline EndgameBruteforce::Session EndgameBruteforce::buildCandidates(
     Session s;
 
     std::vector<int> posToIndex(
-        static_cast<std::size_t>(board.rows + 1) * static_cast<std::size_t>(board.cols + 1), -1);
+        (board.rows + 1) * (board.cols + 1), -1);
     bool warnedZero = false;
     for (int i = 1; i <= board.rows; ++i)
         for (int j = 1; j <= board.cols; ++j) {
@@ -204,7 +204,7 @@ inline EndgameBruteforce::Session EndgameBruteforce::buildCandidates(
                 warnedZero = true;
             }
             if (prob < 1.0L) {
-                posToIndex[static_cast<std::size_t>(board.id(i, j))] =
+                posToIndex[board.id(i, j)] =
                     static_cast<int>(s.candidates.size());
                 s.candidates.push_back({i, j, {}});
             }
@@ -212,11 +212,11 @@ inline EndgameBruteforce::Session EndgameBruteforce::buildCandidates(
 
     for (int i = 1; i <= board.rows; ++i)
         for (int j = 1; j <= board.cols; ++j) {
-            const int idx = posToIndex[static_cast<std::size_t>(board.id(i, j))];
+            const int idx = posToIndex[board.id(i, j)];
             if (idx < 0) continue;
-            auto& links = s.candidates[static_cast<std::size_t>(idx)].links;
+            auto& links = s.candidates[idx].links;
             forEachAdjacent(i, j, board.rows, board.cols, [&](int nx, int ny) {
-                const int nid = posToIndex[static_cast<std::size_t>(board.id(nx, ny))];
+                const int nid = posToIndex[board.id(nx, ny)];
                 if (nid >= 0) links.push_back(nid);
             });
         }
@@ -232,23 +232,23 @@ inline EndgameBruteforce::Session EndgameBruteforce::buildCandidates(
         board, basic, structure, [&](const std::vector<CellId>& mines) {
             std::vector<char> row(s.candidates.size(), 0);
             for (CellId cell : mines) {
-                const int idx = posToIndex[static_cast<std::size_t>(cell)];
+                const int idx = posToIndex[cell];
                 if (idx < 0) continue;
-                row[static_cast<std::size_t>(idx)] = 1;
+                row[idx] = 1;
             }
             s.mineConfigs.push_back(std::move(row));
         });
 
     const int m = static_cast<int>(s.candidates.size());
-    s.reveal.assign(s.mineConfigs.size() * static_cast<std::size_t>(m), 0);
+    s.reveal.assign(s.mineConfigs.size() * m, 0);
     s.mineColsPerRow.assign(s.mineConfigs.size(), {});
     for (std::size_t ci = 0; ci < s.mineConfigs.size(); ++ci)
         for (int j = 0; j < m; ++j) {
             int sum = 0;
-            for (int link : s.candidates[static_cast<std::size_t>(j)].links)
-                sum += s.mineConfigs[ci][static_cast<std::size_t>(link)];
-            s.reveal[ci * static_cast<std::size_t>(m) + static_cast<std::size_t>(j)] = sum;
-            if (s.mineConfigs[ci][static_cast<std::size_t>(j)])
+            for (int link : s.candidates[j].links)
+                sum += s.mineConfigs[ci][link];
+            s.reveal[ci * m + j] = sum;
+            if (s.mineConfigs[ci][j])
                 s.mineColsPerRow[ci].push_back(j);
         }
 
@@ -256,15 +256,14 @@ inline EndgameBruteforce::Session EndgameBruteforce::buildCandidates(
 }
 
 inline int EndgameBruteforce::revealSum(const Session& s, int possibility, int cell) {
-    return s.reveal[static_cast<std::size_t>(possibility) * s.candidates.size() +
-                    static_cast<std::size_t>(cell)];
+    return s.reveal[possibility * s.candidates.size() + cell];
 }
 
 inline U128 EndgameBruteforce::hashConfigs(const std::vector<int>& configs) {
     U128Hasher h;
     const std::uint64_t n = static_cast<std::uint64_t>(configs.size());
     for (std::uint64_t i = 0; i < n; ++i)
-        h.mix(static_cast<std::uint64_t>(configs[static_cast<std::size_t>(i)]) * (n + 1) + i);
+        h.mix(static_cast<std::uint64_t>(configs[i]) * (n + 1) + i);
     return h.finalize();
 }
 
@@ -291,7 +290,7 @@ inline int EndgameBruteforce::solve(Session& s, ScratchBuffers& scratch,
         auto& deaths = buf.deaths;
         deaths.assign(m, 0);
         for (int ci : configs) {
-            const auto& mines = s.mineColsPerRow[static_cast<std::size_t>(ci)];
+            const auto& mines = s.mineColsPerRow[ci];
             for (int j : mines) ++deaths[j];
         }
 
@@ -299,25 +298,25 @@ inline int EndgameBruteforce::solve(Session& s, ScratchBuffers& scratch,
         int best = 0;
         auto& groups = buf.groups;
         for (int j = 0; j < m; ++j) {
-            if (s.opened[static_cast<std::size_t>(j)]) continue;
+            if (s.opened[j]) continue;
             for (auto& g : groups) g.clear();
             for (int ci : configs) {
-                if (s.mineConfigs[static_cast<std::size_t>(ci)][static_cast<std::size_t>(j)]) continue;
-                groups[static_cast<std::size_t>(revealSum(s, ci, j))].push_back(ci);
+                if (s.mineConfigs[ci][j]) continue;
+                groups[revealSum(s, ci, j)].push_back(ci);
             }
 
-            s.opened[static_cast<std::size_t>(j)] = 1;
+            s.opened[j] = 1;
             int wins = 0;
             for (int r = 0; r < 9; ++r) {
-                if (groups[static_cast<std::size_t>(r)].empty()) continue;
-                const int v = solve<false, false>(s, scratch, groups[static_cast<std::size_t>(r)],
+                if (groups[r].empty()) continue;
+                const int v = solve<false, false>(s, scratch, groups[r],
                                                   1, depth + 1, cache, out);
                 wins += v;
             }
-            s.opened[static_cast<std::size_t>(j)] = 0;
+            s.opened[j] = 0;
 
-            out.push_back({s.candidates[static_cast<std::size_t>(j)].x,
-                           s.candidates[static_cast<std::size_t>(j)].y, wins});
+            out.push_back({s.candidates[j].x,
+                           s.candidates[j].y, wins});
             best = (std::max)(best, wins);
         }
         return best;
@@ -332,9 +331,9 @@ inline int EndgameBruteforce::solve(Session& s, ScratchBuffers& scratch,
                     const int ci = configs[0];
                     const int m = static_cast<int>(s.candidates.size());
                     for (int j = 0; j < m; ++j) {
-                        if (!s.mineConfigs[static_cast<std::size_t>(ci)][static_cast<std::size_t>(j)]) {
-                            out[0].x = s.candidates[static_cast<std::size_t>(j)].x;
-                            out[0].y = s.candidates[static_cast<std::size_t>(j)].y;
+                        if (!s.mineConfigs[ci][j]) {
+                            out[0].x = s.candidates[j].x;
+                            out[0].y = s.candidates[j].y;
                             break;
                         }
                     }
@@ -356,22 +355,22 @@ inline int EndgameBruteforce::solve(Session& s, ScratchBuffers& scratch,
         auto& deaths = buf.deaths;
         deaths.assign(m, 0);
         for (int ci : configs) {
-            const auto& mines = s.mineColsPerRow[static_cast<std::size_t>(ci)];
+            const auto& mines = s.mineColsPerRow[ci];
             for (int j : mines) ++deaths[j];
         }
 
         auto& safeCells = buf.safeCells;
         safeCells.clear();
         for (int j = 0; j < m; ++j)
-            if (!s.opened[static_cast<std::size_t>(j)] && deaths[j] == 0) safeCells.push_back(j);
+            if (!s.opened[j] && deaths[j] == 0) safeCells.push_back(j);
 
         if (!safeCells.empty()) {
             if constexpr (IsRoot) {
-                out[0].x = s.candidates[static_cast<std::size_t>(safeCells[0])].x;
-                out[0].y = s.candidates[static_cast<std::size_t>(safeCells[0])].y;
+                out[0].x = s.candidates[safeCells[0]].x;
+                out[0].y = s.candidates[safeCells[0]].y;
             }
             // 安全格不杀任何方案，是免费信息：全部同时点开，按观测向量分组
-            for (int j : safeCells) s.opened[static_cast<std::size_t>(j)] = 1;
+            for (int j : safeCells) s.opened[j] = 1;
             auto& entries = buf.safeEntries;
             entries.clear();
             entries.reserve(configs.size());
@@ -379,7 +378,7 @@ inline int EndgameBruteforce::solve(Session& s, ScratchBuffers& scratch,
             for (int ci : configs) {
                 U128Hasher hasher;
                 for (std::size_t i = 0; i < keyLen; ++i) {
-                    const int v = revealSum(s, ci, safeCells[static_cast<std::size_t>(i)]);
+                    const int v = revealSum(s, ci, safeCells[i]);
                     hasher.mix(static_cast<std::uint64_t>(v) * (keyLen + 1) + i);
                 }
                 entries.push_back({hasher.finalize(), static_cast<std::uint32_t>(ci)});
@@ -411,21 +410,21 @@ inline int EndgameBruteforce::solve(Session& s, ScratchBuffers& scratch,
             auto& suffix = buf.suffix;
             suffix.assign(groupList.size() + 1, 0);
             for (int i = static_cast<int>(groupList.size()) - 1; i >= 0; --i)
-                suffix[i] = suffix[i + 1] + static_cast<int>(groupList[static_cast<std::size_t>(i)]->size());
+                suffix[i] = suffix[i + 1] + static_cast<int>(groupList[i]->size());
 
             int result = 0;
             bool bailed = false;
             for (int i = 0; i < static_cast<int>(groupList.size()); ++i) {
-                const int sizeG = static_cast<int>(groupList[static_cast<std::size_t>(i)]->size());
+                const int sizeG = static_cast<int>(groupList[i]->size());
                 if (result + sizeG + suffix[i + 1] < need) { bailed = true; break; }
                 // 本组至少吃下 target - 已得 - 后面总和（保底 1），不足则整枝作废
                 const int needG = (std::max)(1, need - result - suffix[i + 1]);
-                const int v = solve<false, false>(s, scratch, *groupList[static_cast<std::size_t>(i)],
+                const int v = solve<false, false>(s, scratch, *groupList[i],
                                                   needG, depth + 1, cache, out);
                 if (v == 0) { bailed = true; break; }
                 result += v;
             }
-            for (int j : safeCells) s.opened[static_cast<std::size_t>(j)] = 0;
+            for (int j : safeCells) s.opened[j] = 0;
             if (bailed) return 0;
             cache[cacheKey] = result;
             return result;
@@ -434,9 +433,9 @@ inline int EndgameBruteforce::solve(Session& s, ScratchBuffers& scratch,
         auto& order = buf.order;
         order.clear();
         for (int j = 0; j < m; ++j)
-            if (!s.opened[static_cast<std::size_t>(j)]) order.push_back(j);
+            if (!s.opened[j]) order.push_back(j);
         std::sort(order.begin(), order.end(),
-                  [&](int a, int b) { return deaths[static_cast<std::size_t>(a)] < deaths[static_cast<std::size_t>(b)]; });
+                  [&](int a, int b) { return deaths[a] < deaths[b]; });
 
         int best = 0;
         for (std::size_t idx = 0; idx < order.size(); ++idx) {
@@ -445,16 +444,16 @@ inline int EndgameBruteforce::solve(Session& s, ScratchBuffers& scratch,
             const int target = (std::max)(best + 1, need);
 
             // 全活也到不了目标，后面致死数不减，直接停
-            if (n - deaths[static_cast<std::size_t>(j)] < target) break;
+            if (n - deaths[j] < target) break;
 
             auto& groups = buf.groups;
             for (auto& g : groups) g.clear();
             int groupCount = 0;
             for (int ci : configs) {
-                if (s.mineConfigs[static_cast<std::size_t>(ci)][static_cast<std::size_t>(j)]) continue;
+                if (s.mineConfigs[ci][j]) continue;
                 const int r = revealSum(s, ci, j);
-                if (groups[static_cast<std::size_t>(r)].empty()) ++groupCount;
-                groups[static_cast<std::size_t>(r)].push_back(ci);
+                if (groups[r].empty()) ++groupCount;
+                groups[r].push_back(ci);
             }
 
             // 只有一种观测值 = 无信息，跳过（可证不优于其他招法）
@@ -463,35 +462,35 @@ inline int EndgameBruteforce::solve(Session& s, ScratchBuffers& scratch,
             auto& groupList = buf.groupList;
             groupList.clear();
             for (int r = 0; r < 9; ++r)
-                if (!groups[static_cast<std::size_t>(r)].empty())
-                    groupList.push_back({r, static_cast<int>(groups[static_cast<std::size_t>(r)].size())});
+                if (!groups[r].empty())
+                    groupList.push_back({r, static_cast<int>(groups[r].size())});
             std::sort(groupList.begin(), groupList.end(),
                       [](const auto& a, const auto& b) { return a.second > b.second; });
             auto& suffix = buf.suffix;
             suffix.assign(groupList.size() + 1, 0);
             for (int i = static_cast<int>(groupList.size()) - 1; i >= 0; --i)
-                suffix[i] = suffix[i + 1] + groupList[static_cast<std::size_t>(i)].second;
+                suffix[i] = suffix[i + 1] + groupList[i].second;
 
-            s.opened[static_cast<std::size_t>(j)] = 1;
+            s.opened[j] = 1;
             int wins = 0;
             bool bailed = false;
             for (int i = 0; i < static_cast<int>(groupList.size()); ++i) {
-                const auto& group = groups[static_cast<std::size_t>(groupList[static_cast<std::size_t>(i)].first)];
-                const int sizeG = groupList[static_cast<std::size_t>(i)].second;
+                const auto& group = groups[groupList[i].first];
+                const int sizeG = groupList[i].second;
                 if (wins + sizeG + suffix[i + 1] < target) { bailed = true; break; }
                 const int needG = (std::max)(1, target - wins - suffix[i + 1]);
                 const int v = solve<false, false>(s, scratch, group, needG, depth + 1, cache, out);
                 if (v == 0) { bailed = true; break; }
                 wins += v;
             }
-            s.opened[static_cast<std::size_t>(j)] = 0;
+            s.opened[j] = 0;
             if (bailed) continue;
 
             if (wins > best) {
                 best = wins;
                 if constexpr (IsRoot) {
-                    out[0].x = s.candidates[static_cast<std::size_t>(j)].x;
-                    out[0].y = s.candidates[static_cast<std::size_t>(j)].y;
+                    out[0].x = s.candidates[j].x;
+                    out[0].y = s.candidates[j].y;
                 }
             }
         }
@@ -506,9 +505,9 @@ inline int EndgameBruteforce::solve(Session& s, ScratchBuffers& scratch,
                 if (!configs.empty()) {
                     const int ci = configs[0];
                     for (int j = 0; j < m; ++j) {
-                        if (!s.mineConfigs[static_cast<std::size_t>(ci)][static_cast<std::size_t>(j)]) {
-                            out[0].x = s.candidates[static_cast<std::size_t>(j)].x;
-                            out[0].y = s.candidates[static_cast<std::size_t>(j)].y;
+                        if (!s.mineConfigs[ci][j]) {
+                            out[0].x = s.candidates[j].x;
+                            out[0].y = s.candidates[j].y;
                             break;
                         }
                     }

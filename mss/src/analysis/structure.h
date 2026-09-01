@@ -150,11 +150,11 @@ private:
 inline const Structure::Shape* Structure::ShapePool::intern(Shape shape) {
     shape.hash = Structure::computeHash(shape);
     if (const ShapeId* found = index_.find(shape.hash))
-        return shapes_[static_cast<std::size_t>(*found)].get();
+        return shapes_[*found].get();
     const ShapeId id = static_cast<ShapeId>(shapes_.size());
     shapes_.push_back(std::make_unique<Shape>(std::move(shape)));
-    index_.emplace(shapes_[static_cast<std::size_t>(id)]->hash, id);
-    return shapes_[static_cast<std::size_t>(id)].get();
+    index_.emplace(shapes_[id]->hash, id);
+    return shapes_[id].get();
 }
 
 inline Structure::Result Structure::analyze(const ObservedBoard& state,
@@ -164,7 +164,7 @@ inline Structure::Result Structure::analyze(const ObservedBoard& state,
     const int rows = state.rows;
     const int cols = state.cols;
     Result result;
-    result.cellLoc.assign(static_cast<std::size_t>(rows + 1) * (cols + 1),
+    result.cellLoc.assign((rows + 1) * (cols + 1),
                           CellLocation{});
 
     // 线程局部复用缓冲区，避免反复分配。
@@ -174,7 +174,7 @@ inline Structure::Result Structure::analyze(const ObservedBoard& state,
     if (vis.rows() != rows || vis.cols() != cols) {
         vis.resize(rows, cols, 0);
         cellHash.resize(rows, cols, U128{});
-        cells.reserve(static_cast<std::size_t>(rows * cols / 2));
+        cells.reserve(rows * cols / 2);
     } else {
         vis.fill(0);
         cellHash.fill(U128{});
@@ -205,13 +205,13 @@ inline Structure::Result Structure::analyze(const ObservedBoard& state,
     // 3. 回填格子 → 位置映射。
     for (ComponentId cid = 0; cid < static_cast<ComponentId>(result.components.size());
          ++cid) {
-        const Instance& inst = result.components[static_cast<std::size_t>(cid)];
+        const Instance& inst = result.components[cid];
         for (std::size_t b = 0; b < inst.boxes.count(); ++b)
             for (std::size_t k = inst.boxes.boxOf[b]; k < inst.boxes.boxOf[b + 1]; ++k)
-                result.cellLoc[static_cast<std::size_t>(inst.boxes.cells[k])] =
+                result.cellLoc[inst.boxes.cells[k]] =
                     CellLocation{cid, static_cast<BoxId>(b)};
         for (CellId c : inst.constraintCells)
-            result.cellLoc[static_cast<std::size_t>(c)] = CellLocation{cid, -1};
+            result.cellLoc[c] = CellLocation{cid, -1};
     }
 
     return result;
@@ -273,7 +273,7 @@ inline Structure::Instance Structure::buildComponent(
             shape.boxes.push_back({0});
             tlHashBox.emplace(h, boxId);
         }
-        shape.boxes[static_cast<std::size_t>(boxId)].size++;
+        shape.boxes[boxId].size++;
         tlBoxOfCells[ci] = boxId;
         // 复用 cellHash：改为保存 格子 → 单位格 id。
         cellHash[x][y] = U128{static_cast<std::uint64_t>(boxId), 0};
@@ -284,13 +284,13 @@ inline Structure::Instance Structure::buildComponent(
     for (std::size_t ci = 0; ci < cells.size(); ++ci) {
         const BoxId b = tlBoxOfCells[ci];
         if (b == static_cast<BoxId>(-1)) continue;  // 数字格无单位格归属
-        tlBuckets[static_cast<std::size_t>(b)].push_back(
+        tlBuckets[b].push_back(
             state.id(cells[ci].first, cells[ci].second));
     }
     inst.boxes.boxOf.push_back(0);
     for (std::size_t b = 0; b < tlBuckets.size(); ++b) {
-        inst.boxes.cells.insert(inst.boxes.cells.end(), tlBuckets[static_cast<std::size_t>(b)].begin(),
-                                tlBuckets[static_cast<std::size_t>(b)].end());
+        inst.boxes.cells.insert(inst.boxes.cells.end(), tlBuckets[b].begin(),
+                                tlBuckets[b].end());
         inst.boxes.boxOf.push_back(static_cast<std::uint16_t>(inst.boxes.cells.size()));
     }
 
@@ -304,13 +304,13 @@ inline Structure::Instance Structure::buildComponent(
             if (basic.marks[nx][ny] == Mark::Mine) c.sum--;
             if (basic.marks[nx][ny] == Mark::Frontier) {
                 const BoxId boxId = static_cast<BoxId>(cellHash[nx][ny].lo);
-                if (!tlBoxUsed[static_cast<std::size_t>(boxId)]) {
-                    tlBoxUsed[static_cast<std::size_t>(boxId)] = 1;
+                if (!tlBoxUsed[boxId]) {
+                    tlBoxUsed[boxId] = 1;
                     c.boxIds.push_back(boxId);
                 }
             }
         });
-        for (BoxId id : c.boxIds) tlBoxUsed[static_cast<std::size_t>(id)] = 0;
+        for (BoxId id : c.boxIds) tlBoxUsed[id] = 0;
         shape.constraints.push_back(std::move(c));
         inst.constraintCells.push_back(state.id(x, y));
     }
@@ -352,7 +352,7 @@ inline Structure::Delta Structure::update(const ObservedBoard& state,
         dirty.resize(rows, cols, 0);
         vis.resize(rows, cols, 0);
         cellHash.resize(rows, cols, U128{});
-        cells.reserve(static_cast<std::size_t>(rows * cols / 2));
+        cells.reserve(rows * cols / 2);
     }
     // removedFlag 与组件数组平行，每次更新开头必须**整体**清零：
     // 只在数组增长时补零会残留上一轮的删标——把从未作废的活组件当垃圾删掉
@@ -368,14 +368,14 @@ inline Structure::Delta Structure::update(const ObservedBoard& state,
     };
     // 摘除某格的结构归属。
     auto clearCellLoc = [&](int x, int y) {
-        result.cellLoc[static_cast<std::size_t>(state.id(x, y))] = CellLocation{};
+        result.cellLoc[state.id(x, y)] = CellLocation{};
     };
     // 作废一个组件：打删标、成员全部标脏并清归属（连通块是不可拆分的更新
     // 单位）。删标放在 update 内部的临时 removedFlag，不进公共 Instance 类型，
     // 避免随 Delta::addedData 泄漏给重放/UI 消费方。
     auto invalidateComponent = [&](ComponentId cid) {
-        removedFlag[static_cast<std::size_t>(cid)] = 1;
-        const Instance& inst = result.components[static_cast<std::size_t>(cid)];
+        removedFlag[cid] = 1;
+        const Instance& inst = result.components[cid];
         for (std::size_t b = 0; b < inst.boxes.count(); ++b)
             for (std::size_t k = inst.boxes.boxOf[b]; k < inst.boxes.boxOf[b + 1]; ++k) {
                 const auto [cx, cy] = state.pos(inst.boxes.cells[k]);
@@ -409,9 +409,9 @@ inline Structure::Delta Structure::update(const ObservedBoard& state,
         std::size_t i = 0;
         while (i < dirtyCells.size()) {
             const auto [x, y] = dirtyCells[i++];
-            const CellLocation loc = result.cellLoc[static_cast<std::size_t>(state.id(x, y))];
+            const CellLocation loc = result.cellLoc[state.id(x, y)];
             if (loc.component == -1) continue;
-            if (removedFlag[static_cast<std::size_t>(loc.component)]) continue;  // 已作废
+            if (removedFlag[loc.component]) continue;  // 已作废
             invalidateComponent(loc.component);
         }
     }
@@ -456,28 +456,28 @@ inline Structure::Delta Structure::update(const ObservedBoard& state,
     {
         int i = static_cast<int>(result.components.size()) - 1;
         while (i >= 0) {
-            if (!removedFlag[static_cast<std::size_t>(i)]) {
+            if (!removedFlag[i]) {
                 --i;
                 continue;
             }
             delta.removed.push_back(i);
             // 覆盖/弹出前拷贝原组件（applyDelta(reverse=true) 恢复用，与 removed 同序）。
-            delta.removedData.push_back(result.components[static_cast<std::size_t>(i)]);
+            delta.removedData.push_back(result.components[i]);
             const ComponentId last =
                 static_cast<ComponentId>(result.components.size()) - 1;
             if (i != last) {
-                result.components[static_cast<std::size_t>(i)] =
-                    std::move(result.components[static_cast<std::size_t>(last)]);
-                removedFlag[static_cast<std::size_t>(i)] =
-                    removedFlag[static_cast<std::size_t>(last)];
+                result.components[i] =
+                    std::move(result.components[last]);
+                removedFlag[i] =
+                    removedFlag[last];
                 // 重映射被移动组件的 cellLoc（尾部恒为活组件，见上）。
-                const Instance& moved = result.components[static_cast<std::size_t>(i)];
+                const Instance& moved = result.components[i];
                 for (std::size_t b = 0; b < moved.boxes.count(); ++b)
                     for (std::size_t k = moved.boxes.boxOf[b]; k < moved.boxes.boxOf[b + 1]; ++k)
-                        result.cellLoc[static_cast<std::size_t>(moved.boxes.cells[k])] =
+                        result.cellLoc[moved.boxes.cells[k]] =
                             CellLocation{i, static_cast<BoxId>(b)};
                 for (CellId c : moved.constraintCells)
-                    result.cellLoc[static_cast<std::size_t>(c)] = CellLocation{i, -1};
+                    result.cellLoc[c] = CellLocation{i, -1};
             }
             result.components.pop_back();
             --i;
@@ -491,13 +491,13 @@ inline Structure::Delta Structure::update(const ObservedBoard& state,
         result.components.push_back(std::move(inst));
         delta.added.push_back(newIdx);
         delta.addedData.push_back(result.components.back());  // 重放侧必须自带完整数据
-        const Instance& written = result.components[static_cast<std::size_t>(newIdx)];
+        const Instance& written = result.components[newIdx];
         for (std::size_t b = 0; b < written.boxes.count(); ++b)
             for (std::size_t k = written.boxes.boxOf[b]; k < written.boxes.boxOf[b + 1]; ++k)
-                result.cellLoc[static_cast<std::size_t>(written.boxes.cells[k])] =
+                result.cellLoc[written.boxes.cells[k]] =
                     CellLocation{newIdx, static_cast<BoxId>(b)};
         for (CellId c : written.constraintCells)
-            result.cellLoc[static_cast<std::size_t>(c)] = CellLocation{newIdx, -1};
+            result.cellLoc[c] = CellLocation{newIdx, -1};
     }
 
     // 5. 清零工作区。清理集 = dirtyCells（事件邻域 + 被作废成员）∪ 本轮新建
@@ -510,7 +510,7 @@ inline Structure::Delta Structure::update(const ObservedBoard& state,
     }
     dirtyCells.clear();
     for (int c = appendStart; c < static_cast<int>(result.components.size()); ++c) {
-        const Instance& inst = result.components[static_cast<std::size_t>(c)];
+        const Instance& inst = result.components[c];
         for (std::size_t b = 0; b < inst.boxes.count(); ++b)
             for (std::size_t k = inst.boxes.boxOf[b]; k < inst.boxes.boxOf[b + 1]; ++k) {
                 const auto [x, y] = state.pos(inst.boxes.cells[k]);
@@ -541,31 +541,31 @@ inline void Structure::applyDelta(Result& result, const Delta& delta, bool rever
             const Instance& victim = result.components.back();
             for (std::size_t b = 0; b < victim.boxes.count(); ++b)
                 for (std::size_t k = victim.boxes.boxOf[b]; k < victim.boxes.boxOf[b + 1]; ++k)
-                    result.cellLoc[static_cast<std::size_t>(victim.boxes.cells[k])] = CellLocation{};
+                    result.cellLoc[victim.boxes.cells[k]] = CellLocation{};
             for (CellId c : victim.constraintCells)
-                result.cellLoc[static_cast<std::size_t>(c)] = CellLocation{};
+                result.cellLoc[c] = CellLocation{};
             result.components.pop_back();
         }
         for (std::size_t k = delta.removed.size(); k-- > 0;) {
             const ComponentId i = delta.removed[k];
             const ComponentId tail = static_cast<ComponentId>(result.components.size());
             result.components.push_back(
-                std::move(result.components[static_cast<std::size_t>(i)]));
-            const Instance& moved = result.components[static_cast<std::size_t>(tail)];
+                std::move(result.components[i]));
+            const Instance& moved = result.components[tail];
             for (std::size_t b = 0; b < moved.boxes.count(); ++b)
                 for (std::size_t j = moved.boxes.boxOf[b]; j < moved.boxes.boxOf[b + 1]; ++j)
-                    result.cellLoc[static_cast<std::size_t>(moved.boxes.cells[j])] =
+                    result.cellLoc[moved.boxes.cells[j]] =
                         CellLocation{tail, static_cast<BoxId>(b)};
             for (CellId c : moved.constraintCells)
-                result.cellLoc[static_cast<std::size_t>(c)] = CellLocation{tail, -1};
-            result.components[static_cast<std::size_t>(i)] = delta.removedData[k];
-            const Instance& restored = result.components[static_cast<std::size_t>(i)];
+                result.cellLoc[c] = CellLocation{tail, -1};
+            result.components[i] = delta.removedData[k];
+            const Instance& restored = result.components[i];
             for (std::size_t b = 0; b < restored.boxes.count(); ++b)
                 for (std::size_t j = restored.boxes.boxOf[b]; j < restored.boxes.boxOf[b + 1]; ++j)
-                    result.cellLoc[static_cast<std::size_t>(restored.boxes.cells[j])] =
+                    result.cellLoc[restored.boxes.cells[j]] =
                         CellLocation{i, static_cast<BoxId>(b)};
             for (CellId c : restored.constraintCells)
-                result.cellLoc[static_cast<std::size_t>(c)] = CellLocation{i, -1};
+                result.cellLoc[c] = CellLocation{i, -1};
         }
         return;
     }
@@ -573,37 +573,37 @@ inline void Structure::applyDelta(Result& result, const Delta& delta, bool rever
     for (const ComponentId i : delta.removed) {
         // 先清被删组件的 cellLoc（与 update 的作废语义对齐）：否则重放后
         // 这些格子仍指向已删除/已挪走的组件，observe 会读到脏归属。
-        const Instance& victim = result.components[static_cast<std::size_t>(i)];
+        const Instance& victim = result.components[i];
         for (std::size_t b = 0; b < victim.boxes.count(); ++b)
             for (std::size_t k = victim.boxes.boxOf[b]; k < victim.boxes.boxOf[b + 1]; ++k)
-                result.cellLoc[static_cast<std::size_t>(victim.boxes.cells[k])] = CellLocation{};
+                result.cellLoc[victim.boxes.cells[k]] = CellLocation{};
         for (CellId c : victim.constraintCells)
-            result.cellLoc[static_cast<std::size_t>(c)] = CellLocation{};
+            result.cellLoc[c] = CellLocation{};
         const ComponentId last = static_cast<ComponentId>(result.components.size()) - 1;
         if (i != last) {
-            result.components[static_cast<std::size_t>(i)] =
-                std::move(result.components[static_cast<std::size_t>(last)]);
+            result.components[i] =
+                std::move(result.components[last]);
             // 重映射被移动组件的 cellLoc。
-            const Instance& moved = result.components[static_cast<std::size_t>(i)];
+            const Instance& moved = result.components[i];
             for (std::size_t b = 0; b < moved.boxes.count(); ++b)
                 for (std::size_t k = moved.boxes.boxOf[b]; k < moved.boxes.boxOf[b + 1]; ++k)
-                    result.cellLoc[static_cast<std::size_t>(moved.boxes.cells[k])] =
+                    result.cellLoc[moved.boxes.cells[k]] =
                         CellLocation{i, static_cast<BoxId>(b)};
             for (CellId c : moved.constraintCells)
-                result.cellLoc[static_cast<std::size_t>(c)] = CellLocation{i, -1};
+                result.cellLoc[c] = CellLocation{i, -1};
         }
         result.components.pop_back();
     }
     for (std::size_t i = 0; i < delta.addedData.size(); ++i) {
         const ComponentId cid = static_cast<ComponentId>(result.components.size());
         result.components.push_back(delta.addedData[i]);
-        const Instance& inst = result.components[static_cast<std::size_t>(cid)];
+        const Instance& inst = result.components[cid];
         for (std::size_t b = 0; b < inst.boxes.count(); ++b)
             for (std::size_t k = inst.boxes.boxOf[b]; k < inst.boxes.boxOf[b + 1]; ++k)
-                result.cellLoc[static_cast<std::size_t>(inst.boxes.cells[k])] =
+                result.cellLoc[inst.boxes.cells[k]] =
                     CellLocation{cid, static_cast<BoxId>(b)};
         for (CellId c : inst.constraintCells)
-            result.cellLoc[static_cast<std::size_t>(c)] = CellLocation{cid, -1};
+            result.cellLoc[c] = CellLocation{cid, -1};
     }
 }
 

@@ -118,7 +118,7 @@ inline Basic::Result Basic::analyze(const ObservedBoard& state) {
     // 3. 从每个数字格开始泛洪。任一新 Mine / Safe 都会重新检查相邻数字，
     //    直到雷饱和与安全饱和都不再产生新结论。
     std::vector<CellId> pending;
-    pending.reserve(static_cast<std::size_t>(n * m));
+    pending.reserve(n * m);
     for (int i = 1; i <= n; ++i)
         for (int j = 1; j <= m; ++j)
             if (isNumber(board[i][j])) pending.push_back(state.id(i, j));
@@ -264,7 +264,7 @@ inline void Basic::applyDelta(Result& result, const Delta& delta, bool reverse) 
     if (reverse) {
         // 撤销：逆序回放标记（同格多次变化时逆序回退整链），统计恢复应用前值。
         for (std::size_t i = delta.changes.size(); i-- > 0;) {
-            const Delta::Change& c = delta.changes[static_cast<std::size_t>(i)];
+            const Delta::Change& c = delta.changes[i];
             const int x = c.cell / (result.cols + 1);
             const int y = c.cell % (result.cols + 1);
             result.marks[x][y] = c.old;

@@ -155,19 +155,19 @@ inline long double DistributionSolver::binom(int n, int k) {
     static constexpr std::array<std::array<long double, kMax + 1>, kMax + 1> kComb = []() {
         std::array<std::array<long double, kMax + 1>, kMax + 1> t{};
         for (int n = 0; n <= kMax; ++n) {
-            t[static_cast<std::size_t>(n)][0] = 1;
-            t[static_cast<std::size_t>(n)][static_cast<std::size_t>(n)] = 1;
+            t[n][0] = 1;
+            t[n][n] = 1;
             for (int k = 1; k < n; ++k)
-                t[static_cast<std::size_t>(n)][static_cast<std::size_t>(k)] =
-                t[static_cast<std::size_t>(n - 1)][static_cast<std::size_t>(k - 1)] +
-                t[static_cast<std::size_t>(n - 1)][static_cast<std::size_t>(k)];
+                t[n][k] =
+                t[n - 1][k - 1] +
+                t[n - 1][k];
         }
         return t;
         }();
 
     // 调用方（forEachAssignment）保证 0<=k<=n<=box.size<=kMax；越界=结构 bug。
     assert_(k >= 0 && k <= n && n <= kMax, "Distribution:binom: 参数越界");
-    return kComb[static_cast<std::size_t>(n)][static_cast<std::size_t>(k)];
+    return kComb[n][k];
 }
 
 inline std::pair<BoxId, BoxId> DistributionSolver::findDiameter(const Graph& graph) {
@@ -177,13 +177,13 @@ inline std::pair<BoxId, BoxId> DistributionSolver::findDiameter(const Graph& gra
         int farthestDistance = 0;
 
         auto dfs = [&](auto&& self, BoxId node, int distance) -> void {
-            visited[static_cast<std::size_t>(node)] = 1;
+            visited[node] = 1;
             if (distance > farthestDistance) {
                 farthestDistance = distance;
                 farthestNode = node;
             }
-            for (const BoxId neighbor : graph.neighbors[static_cast<std::size_t>(node)])
-                if (!visited[static_cast<std::size_t>(neighbor)])
+            for (const BoxId neighbor : graph.neighbors[node])
+                if (!visited[neighbor])
                     self(self, neighbor, distance + 1);
         };
 
@@ -288,8 +288,8 @@ inline const DistributionSolver::Distribution* DistributionSolver::analyze(const
                                    static_cast<std::uint64_t>(second)};
                 if (edgeSet.find(edgeKey)) continue;
                 edgeSet.emplace(edgeKey, 0);
-                graph.neighbors[static_cast<std::size_t>(lhs)].push_back(rhs);
-                graph.neighbors[static_cast<std::size_t>(rhs)].push_back(lhs);
+                graph.neighbors[lhs].push_back(rhs);
+                graph.neighbors[rhs].push_back(lhs);
             }
         }
     }

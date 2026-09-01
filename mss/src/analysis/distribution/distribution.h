@@ -113,19 +113,19 @@ inline long double Distribution::Solver::binom(int n, int k) {
     static constexpr std::array<std::array<long double, kMax + 1>, kMax + 1> kComb = []() {
         std::array<std::array<long double, kMax + 1>, kMax + 1> t{};
         for (int n = 0; n <= kMax; ++n) {
-            t[static_cast<std::size_t>(n)][0] = 1;
-            t[static_cast<std::size_t>(n)][static_cast<std::size_t>(n)] = 1;
+            t[n][0] = 1;
+            t[n][n] = 1;
             for (int k = 1; k < n; ++k)
-                t[static_cast<std::size_t>(n)][static_cast<std::size_t>(k)] =
-                    t[static_cast<std::size_t>(n - 1)][static_cast<std::size_t>(k - 1)] +
-                    t[static_cast<std::size_t>(n - 1)][static_cast<std::size_t>(k)];
+                t[n][k] =
+                    t[n - 1][k - 1] +
+                    t[n - 1][k];
         }
         return t;
     }();
 
     // 调用方（forEachAssignment）保证 0<=k<=n<=box.size<=kMax；越界=结构 bug。
     assert_(k >= 0 && k <= n && n <= kMax, "Distribution::binom: 参数越界");
-    return kComb[static_cast<std::size_t>(n)][static_cast<std::size_t>(k)];
+    return kComb[n][k];
 }
 
 template <typename OnAssignment>
@@ -141,19 +141,19 @@ inline void Distribution::Solver::forEachAssignment(const Structure::Shape& shap
     static thread_local std::vector<int> tlCurSum;
     static thread_local std::vector<int> tlSizeSum;
     static thread_local std::vector<char> tlAssignment;
-    tlBoxLimits.assign(static_cast<std::size_t>(n), {});
-    tlConsSum.assign(static_cast<std::size_t>(nc), 0);
-    tlConsMaxAdd.assign(static_cast<std::size_t>(nc), 0);
-    tlCurSum.assign(static_cast<std::size_t>(nc), 0);
-    tlSizeSum.assign(static_cast<std::size_t>(nc), 0);
-    tlAssignment.assign(static_cast<std::size_t>(n), 0);
+    tlBoxLimits.assign(n, {});
+    tlConsSum.assign(nc, 0);
+    tlConsMaxAdd.assign(nc, 0);
+    tlCurSum.assign(nc, 0);
+    tlSizeSum.assign(nc, 0);
+    tlAssignment.assign(n, 0);
 
     for (int i = 0; i < nc; ++i) {
-        tlConsSum[static_cast<std::size_t>(i)] = shape.constraints[static_cast<std::size_t>(i)].sum;
-        for (BoxId boxId : shape.constraints[static_cast<std::size_t>(i)].boxIds) {
-            tlConsMaxAdd[static_cast<std::size_t>(i)] +=
-                shape.boxes[static_cast<std::size_t>(boxId)].size;
-            tlBoxLimits[static_cast<std::size_t>(boxId)].push_back(i);
+        tlConsSum[i] = shape.constraints[i].sum;
+        for (BoxId boxId : shape.constraints[i].boxIds) {
+            tlConsMaxAdd[i] +=
+                shape.boxes[boxId].size;
+            tlBoxLimits[boxId].push_back(i);
         }
     }
 
@@ -166,30 +166,30 @@ inline void Distribution::Solver::forEachAssignment(const Structure::Shape& shap
             onAssignment(tlAssignment, curWays);
             return;
         }
-        const int maxK = shape.boxes[static_cast<std::size_t>(idx)].size;
+        const int maxK = shape.boxes[idx].size;
         for (int k = 0; k <= maxK; ++k) {
-            tlAssignment[static_cast<std::size_t>(idx)] = static_cast<char>(k);
+            tlAssignment[idx] = static_cast<char>(k);
             bool ok = true;
-            for (int c : tlBoxLimits[static_cast<std::size_t>(idx)]) {
-                const int s = tlCurSum[static_cast<std::size_t>(c)] + k;
+            for (int c : tlBoxLimits[idx]) {
+                const int s = tlCurSum[c] + k;
                 // rem = 约束 c 未赋 box（含当前 idx）的 size 之和
-                const int rem = tlConsMaxAdd[static_cast<std::size_t>(c)] -
-                                (tlSizeSum[static_cast<std::size_t>(c)] + maxK);
-                if (s > tlConsSum[static_cast<std::size_t>(c)] ||
-                    s + rem < tlConsSum[static_cast<std::size_t>(c)]) {
+                const int rem = tlConsMaxAdd[c] -
+                                (tlSizeSum[c] + maxK);
+                if (s > tlConsSum[c] ||
+                    s + rem < tlConsSum[c]) {
                     ok = false;
                     break;
                 }
             }
             if (ok) {
-                for (int c : tlBoxLimits[static_cast<std::size_t>(idx)]) {
-                    tlCurSum[static_cast<std::size_t>(c)] += k;
-                    tlSizeSum[static_cast<std::size_t>(c)] += maxK;
+                for (int c : tlBoxLimits[idx]) {
+                    tlCurSum[c] += k;
+                    tlSizeSum[c] += maxK;
                 }
                 self(self, idx + 1, curWays * binom(maxK, k));
-                for (int c : tlBoxLimits[static_cast<std::size_t>(idx)]) {
-                    tlCurSum[static_cast<std::size_t>(c)] -= k;   // 回溯
-                    tlSizeSum[static_cast<std::size_t>(c)] -= maxK;
+                for (int c : tlBoxLimits[idx]) {
+                    tlCurSum[c] -= k;   // 回溯
+                    tlSizeSum[c] -= maxK;
                 }
             }
         }
@@ -208,31 +208,30 @@ inline const Distribution* Distribution::Solver::analyze(const Structure::Shape&
     // 线程局部复用工作区（analyze 非重入、无并发）：避免每块新建嵌套 vector。
     static thread_local std::vector<long double> wayTable;
     static thread_local std::vector<long double> expectFlat;
-    wayTable.assign(static_cast<std::size_t>(maxTotal + 1), 0.0L);
-    expectFlat.assign(static_cast<std::size_t>(maxTotal + 1) * static_cast<std::size_t>(n),
-                      0.0L);
+    wayTable.assign(maxTotal + 1, 0.0L);
+    expectFlat.assign((maxTotal + 1) * n, 0.0L);
 
     forEachAssignment(shape, [&](const std::vector<char>& assignment, long double ways) {
         int total = 0;
-        for (int i = 0; i < n; ++i) total += assignment[static_cast<std::size_t>(i)];
-        wayTable[static_cast<std::size_t>(total)] += ways;
-        const std::size_t row = static_cast<std::size_t>(total) * static_cast<std::size_t>(n);
+        for (int i = 0; i < n; ++i) total += assignment[i];
+        wayTable[total] += ways;
+        const std::size_t row = total * n;
         for (int i = 0; i < n; ++i)
-            expectFlat[row + static_cast<std::size_t>(i)] +=
-                ways * assignment[static_cast<std::size_t>(i)];
+            expectFlat[row + i] +=
+                ways * assignment[i];
     });
 
     Distribution dist;
     for (int total = 0; total <= maxTotal; ++total) {
-        if (wayTable[static_cast<std::size_t>(total)] == 0) continue;
+        if (wayTable[total] == 0) continue;
         Entry e;
         e.mineCount = total;
-        e.ways = wayTable[static_cast<std::size_t>(total)];
-        const std::size_t row = static_cast<std::size_t>(total) * static_cast<std::size_t>(n);
-        e.perBoxExpectation.resize(static_cast<std::size_t>(n));
+        e.ways = wayTable[total];
+        const std::size_t row = total * n;
+        e.perBoxExpectation.resize(n);
         for (int i = 0; i < n; ++i)
-            e.perBoxExpectation[static_cast<std::size_t>(i)] =
-                expectFlat[row + static_cast<std::size_t>(i)] / e.ways;
+            e.perBoxExpectation[i] =
+                expectFlat[row + i] / e.ways;
         dist.entries.push_back(std::move(e));
     }
 
@@ -258,7 +257,7 @@ inline void Distribution::Solver::all_distribute(const ObservedBoard& board,
 
     // 当前已摆出的雷（不含 basic 已确定的 Mine），叶子节点时交给 callback。
     std::vector<CellId> placed;
-    placed.reserve(static_cast<std::size_t>(board.totalMines));
+    placed.reserve(board.totalMines);
 
     // 从 positions[start..] 里选 need 个位置，选中时压入 placed，选完调 on_complete。
     auto choose = [&](auto&& self, const std::vector<CellId>& positions, int start, int need,
@@ -269,7 +268,7 @@ inline void Distribution::Solver::all_distribute(const ObservedBoard& board,
         }
         const int n = static_cast<int>(positions.size());
         for (int i = start; i <= n - need; ++i) {
-            placed.push_back(positions[static_cast<std::size_t>(i)]);
+            placed.push_back(positions[i]);
             self(self, positions, i + 1, need - 1, on_complete);
             placed.pop_back();
         }
@@ -283,25 +282,25 @@ inline void Distribution::Solver::all_distribute(const ObservedBoard& board,
     const int compCount = static_cast<int>(comps.size());
 
     // 后缀最大雷数，用于剪枝：当前已用 + 后面所有连通块全摆满仍不够剩余雷数时提前返回。
-    std::vector<int> suffixMax(static_cast<std::size_t>(compCount + 1), 0);
+    std::vector<int> suffixMax(compCount + 1, 0);
     for (int ci = compCount - 1; ci >= 0; --ci) {
         const Structure::Instance& inst =
-            structure.components[static_cast<std::size_t>(comps[static_cast<std::size_t>(ci)])];
+            structure.components[comps[ci]];
         int mx = 0;
         for (std::size_t b = 0; b < inst.boxes.count(); ++b)
             mx += static_cast<int>(inst.boxes.cellCount(b));
-        suffixMax[static_cast<std::size_t>(ci)] =
-            suffixMax[static_cast<std::size_t>(ci + 1)] + mx;
+        suffixMax[ci] =
+            suffixMax[ci + 1] + mx;
     }
 
     // 按连通块编号预计算深分配（各单位格雷数），只 DFS 一次。
     std::vector<std::vector<std::vector<char>>> deepCache(
-        static_cast<std::size_t>(compCount));
+        compCount);
     for (int ci = 0; ci < compCount; ++ci) {
         const Structure::Instance& inst =
-            structure.components[static_cast<std::size_t>(comps[static_cast<std::size_t>(ci)])];
+            structure.components[comps[ci]];
         forEachAssignment(*inst.shape, [&](const std::vector<char>& assignment, long double) {
-            deepCache[static_cast<std::size_t>(ci)].push_back(assignment);
+            deepCache[ci].push_back(assignment);
         });
     }
 
@@ -319,14 +318,14 @@ inline void Distribution::Solver::all_distribute(const ObservedBoard& board,
             return;
         }
         // 后面所有连通块 + 全部 T 格都摆满雷仍不够剩余雷数，则此分支无解。
-        if (used + suffixMax[static_cast<std::size_t>(ci)] +
+        if (used + suffixMax[ci] +
                 static_cast<int>(tcells.size()) < mines)
             return;
 
         const Structure::Instance& inst =
-            structure.components[static_cast<std::size_t>(comps[static_cast<std::size_t>(ci)])];
+            structure.components[comps[ci]];
         const int n = static_cast<int>(inst.boxes.count());
-        const auto& deep = deepCache[static_cast<std::size_t>(ci)];
+        const auto& deep = deepCache[ci];
 
         for (const auto& assignment : deep) {
             int compMines = 0;
@@ -338,11 +337,11 @@ inline void Distribution::Solver::all_distribute(const ObservedBoard& board,
                 }
                 // 取第 boxi 个 box 的格子区间。
                 std::vector<CellId> boxCells;
-                boxCells.reserve(inst.boxes.cellCount(static_cast<std::size_t>(boxi)));
-                for (std::size_t k = inst.boxes.boxOf[static_cast<std::size_t>(boxi)];
-                     k < inst.boxes.boxOf[static_cast<std::size_t>(boxi + 1)]; ++k)
+                boxCells.reserve(inst.boxes.cellCount(boxi));
+                for (std::size_t k = inst.boxes.boxOf[boxi];
+                     k < inst.boxes.boxOf[boxi + 1]; ++k)
                     boxCells.push_back(inst.boxes.cells[k]);
-                choose(choose, boxCells, 0, assignment[static_cast<std::size_t>(boxi)],
+                choose(choose, boxCells, 0, assignment[boxi],
                        [&] { selfBox(selfBox, boxi + 1); });
             };
             dfsBox(dfsBox, 0);

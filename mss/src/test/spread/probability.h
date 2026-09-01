@@ -20,13 +20,13 @@ inline void testProbabilitySpread(Rng& rng, const TestConfig& config) {
             for (int x = 1; x <= board.rows; ++x) for (int y = 1; y <= board.cols; ++y) {
                 if (board.board[x][y] != Cell::Hidden) continue;
                 const CellId cell = board.id(x, y);
-                const CellLocation loc = structure.cellLoc[static_cast<std::size_t>(cell)];
+                const CellLocation loc = structure.cellLoc[cell];
                 const long double raw = loc.component == -1
                     ? (basic.marks[x][y] == Basic::Mark::Mine ? 1.0L
                        : basic.marks[x][y] == Basic::Mark::Unknown ? probability.tCellProbability : 0.0L)
                     : loc.box == -1 ? 0.0L
-                    : probability.components[static_cast<std::size_t>(loc.component)].boxProbs[
-                        static_cast<std::size_t>(loc.box)];
+                    : probability.components[loc.component].boxProbs[
+                        loc.box];
                 const long double p = probability.mineProbability(cell, board, basic, structure);
                 probabilityExtremes().note(raw);
                 // 定义 MSS_TEST_RAW_PROBABILITIES 时只记录原始概率、跳过语义

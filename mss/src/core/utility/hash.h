@@ -32,7 +32,7 @@ struct U128 {
 // 键的完整相等性由探测时比较 U128 全量保证，折叠碰撞不产生错误结果。
 struct U128Hash {
     std::size_t operator()(const U128& k) const noexcept {
-        return static_cast<std::size_t>(k.lo ^ k.hi);
+        return k.lo ^ k.hi;
     }
 };
 

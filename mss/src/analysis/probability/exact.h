@@ -84,9 +84,9 @@ inline long double Exact::combLog(int n, int k) {
     assert_(k >= 0 && k <= n, "Exact::combLog: 参数越界");
     if (k == 0 || k == n) return 1;
     combiInit(n);
-    return std::exp(logFactorial()[static_cast<std::size_t>(n)] -
-                    logFactorial()[static_cast<std::size_t>(k)] -
-                    logFactorial()[static_cast<std::size_t>(n - k)]);
+    return std::exp(logFactorial()[n] -
+                    logFactorial()[k] -
+                    logFactorial()[n - k]);
 }
 
 inline Exact::Polynomial::Polynomial(const Distribution& dist) {
@@ -98,9 +98,9 @@ inline Exact::Polynomial::Polynomial(const Distribution& dist) {
         minExp = std::min(minExp, d.mineCount);
         maxExp = std::max(maxExp, d.mineCount);
     }
-    std::vector<long double> c(static_cast<std::size_t>(maxExp - minExp + 1), 0.0);
+    std::vector<long double> c(maxExp - minExp + 1, 0.0);
     for (const auto& d : dist.entries)
-        c[static_cast<std::size_t>(d.mineCount - minExp)] = d.ways;
+        c[d.mineCount - minExp] = d.ways;
     *this = Polynomial(minExp, std::move(c));
 }
 
@@ -108,12 +108,12 @@ inline Exact::Polynomial Exact::Polynomial::operator*(const Polynomial& other) c
     const int start = this->start + other.start;
     const int size = static_cast<int>(coeffs.size()) +
                      static_cast<int>(other.coeffs.size()) - 1;
-    std::vector<long double> res(static_cast<std::size_t>(size), 0.0);
+    std::vector<long double> res(size, 0.0);
     for (int i = 0; i < static_cast<int>(coeffs.size()); ++i)
         for (int j = 0; j < static_cast<int>(other.coeffs.size()); ++j)
-            res[static_cast<std::size_t>(i + j)] +=
-                coeffs[static_cast<std::size_t>(i)] *
-                other.coeffs[static_cast<std::size_t>(j)];
+            res[i + j] +=
+                coeffs[i] *
+                other.coeffs[j];
     return Polynomial(start, std::move(res));
 }
 
@@ -121,18 +121,18 @@ inline Exact::Polynomial Exact::Polynomial::operator/(const Polynomial& other) c
     const int start = this->start - other.start;
     const int size = std::max(
         0, static_cast<int>(coeffs.size()) - static_cast<int>(other.coeffs.size()) + 1);
-    std::vector<long double> res(static_cast<std::size_t>(size), 0.0);
+    std::vector<long double> res(size, 0.0);
     std::vector<long double> rem(coeffs);
     const long double otherLeading = other.coeffs.back();
     for (int i = static_cast<int>(rem.size()) - 1;
          i >= static_cast<int>(other.coeffs.size()) - 1; --i) {
-        if (std::abs(rem[static_cast<std::size_t>(i)]) < 1e-10L) continue;
-        const long double factor = rem[static_cast<std::size_t>(i)] / otherLeading;
+        if (std::abs(rem[i]) < 1e-10L) continue;
+        const long double factor = rem[i] / otherLeading;
         const int quotIdx = i - (static_cast<int>(other.coeffs.size()) - 1);
-        res[static_cast<std::size_t>(quotIdx)] = factor;
+        res[quotIdx] = factor;
         for (int j = 0; j < static_cast<int>(other.coeffs.size()); ++j)
-            rem[static_cast<std::size_t>(i - j)] -=
-                factor * other.coeffs[other.coeffs.size() - 1 - static_cast<std::size_t>(j)];
+            rem[i - j] -=
+                factor * other.coeffs[other.coeffs.size() - 1 - j];
     }
     return Polynomial(start, std::move(res));
 }
@@ -143,7 +143,7 @@ inline long double Exact::denominator(const Polynomial& gf, int totalMines, int 
         const int heavyMines = gf.start + i;
         const int lightMines = totalMines - heavyMines;
         if (lightMines >= 0 && lightMines <= tSum)
-            result += gf.coeffs[static_cast<std::size_t>(i)] * combLog(tSum, lightMines);
+            result += gf.coeffs[i] * combLog(tSum, lightMines);
     }
     return result;
 }
@@ -164,7 +164,7 @@ inline Probability::Result Exact::analyze(const ObservedBoard& board,
     for (ComponentId cid = 0; cid < static_cast<ComponentId>(structure.components.size());
          ++cid) {
         const Structure::Instance& inst =
-            structure.components[static_cast<std::size_t>(cid)];
+            structure.components[cid];
         aliveIds.push_back(cid);
         // 取分布（同 shape 幂等命中池缓存）。
         distList.push_back(Distribution::Solver::analyze(*inst.shape, pool));
@@ -182,7 +182,7 @@ inline Probability::Result Exact::analyze(const ObservedBoard& board,
         const int heavyMines = pH.start + i;
         const int lightMines = M - 1 - heavyMines;
         if (lightMines >= 0 && lightMines <= tSum - 1)
-            lightProb += pH.coeffs[static_cast<std::size_t>(i)] * combLog(tSum - 1, lightMines);
+            lightProb += pH.coeffs[i] * combLog(tSum - 1, lightMines);
     }
     lightProb /= denom;
     result.tCellProbability = Probability::limitProbability(lightProb);
@@ -192,7 +192,7 @@ inline Probability::Result Exact::analyze(const ObservedBoard& board,
     for (std::size_t ai = 0; ai < aliveIds.size(); ++ai) {
         const ComponentId cid = aliveIds[ai];
         const Structure::Instance& inst =
-            structure.components[static_cast<std::size_t>(cid)];
+            structure.components[cid];
         const Distribution& dist = *distList[ai];
         const Polynomial pi(dist);
         const Polynomial ti = pH / pi;  // 去掉第 i 块后的联合分布
@@ -206,14 +206,14 @@ inline Probability::Result Exact::analyze(const ObservedBoard& board,
                 const int tMines = ti.start + k;
                 const int lightMines = M - v - tMines;
                 if (lightMines >= 0 && lightMines <= tSum)
-                    numerator += w * ti.coeffs[static_cast<std::size_t>(k)] *
+                    numerator += w * ti.coeffs[k] *
                                  combLog(tSum, lightMines);
             }
             boxProb[j] = numerator / denom;
         }
 
         // 每 box 期望 × 取到概率 → 均摊到单格。
-        auto& cr = result.components[static_cast<std::size_t>(cid)];
+        auto& cr = result.components[cid];
         const Structure::Shape& shape = *inst.shape;
         cr.boxProbs.resize(shape.boxes.size());
         for (std::size_t b = 0; b < shape.boxes.size(); ++b) {
@@ -253,7 +253,7 @@ inline Probability::ObserveResult Exact::observe(
         return out;
     }
     const bool xInT = (basic.marks[x][y] == Mark::Unknown);
-    const CellLocation xloc = structure.cellLoc[static_cast<std::size_t>(cell)];
+    const CellLocation xloc = structure.cellLoc[cell];
     const bool xInBox = (xloc.component >= 0);
     const ComponentId xCid = xloc.component;
     const BoxId xBox = xloc.box;
@@ -277,15 +277,15 @@ inline Probability::ObserveResult Exact::observe(
             ++uT;
             return;
         }
-        const CellLocation loc = structure.cellLoc[static_cast<std::size_t>(board.id(nx, ny))];
+        const CellLocation loc = structure.cellLoc[board.id(nx, ny)];
         if (loc.component == -1) return;  // 已揭示数字 / Safe
-        if (!seen[static_cast<std::size_t>(loc.component)]) {
-            seen[static_cast<std::size_t>(loc.component)] = 1;
+        if (!seen[loc.component]) {
+            seen[loc.component] = 1;
             captured.push_back(loc.component);
         }
     });
     // x 在 box 里却未被捕获 = Basic/Structure 跨层不变式被破坏 → 概率静默错误。
-    assert_(!xInBox || seen[static_cast<std::size_t>(xCid)] != 0,
+    assert_(!xInBox || seen[xCid] != 0,
             "Exact::observe: x 所在连通块未被捕获");
 
     // ── 步骤 2：转移预计算 —— 每个被抓住连通块折成一张稀疏转移表 ──
@@ -301,7 +301,7 @@ inline Probability::ObserveResult Exact::observe(
     int maxY = uT;
     std::vector<std::vector<Transfer>> transfers;
     for (ComponentId cid : captured) {
-        const Structure::Instance& inst = structure.components[static_cast<std::size_t>(cid)];
+        const Structure::Instance& inst = structure.components[cid];
         const Structure::Shape& shape = *inst.shape;
         for (const auto& box : shape.boxes) maxY += box.size;
         // 各 box 中与 x 相邻的格数（observe 内部预计算用）
@@ -319,7 +319,7 @@ inline Probability::ObserveResult Exact::observe(
         int maxTotal = 0;
         for (const auto& box : shape.boxes) maxTotal += box.size;
         std::vector<std::array<long double, 9>> acc(
-            static_cast<std::size_t>(maxTotal + 1));
+            maxTotal + 1);
         Distribution::Solver::forEachAssignment(
             shape, [&](const std::vector<char>& assignment, long double ways) {
                 int yInc = 0;
@@ -339,30 +339,30 @@ inline Probability::ObserveResult Exact::observe(
                     for (int r = 0; r <= rMax; ++r) {
                         const int rest = m - r;
                         if (rest > pool - ub) continue;
-                        dist[static_cast<std::size_t>(r)] =
+                        dist[r] =
                             combLog(ub, r) * combLog(pool - ub, rest) /
                             combLog(s, m);
                     }
                     // 卷积：conv ⊗ dist（h 平移 r）
                     std::array<long double, 9> nc{};
                     for (int h = 0; h <= 8; ++h)
-                        if (conv[static_cast<std::size_t>(h)] != 0.0L)
+                        if (conv[h] != 0.0L)
                             for (int r = 0; r <= 8 - h; ++r)
-                                nc[static_cast<std::size_t>(h + r)] +=
-                                    conv[static_cast<std::size_t>(h)] *
-                                    dist[static_cast<std::size_t>(r)];
+                                nc[h + r] +=
+                                    conv[h] *
+                                    dist[r];
                     conv = nc;
                 }
                 for (int h = 0; h <= 8; ++h)
-                    if (conv[static_cast<std::size_t>(h)] != 0.0L)
-                        acc[static_cast<std::size_t>(yInc)][static_cast<std::size_t>(h)] +=
-                            ways * conv[static_cast<std::size_t>(h)];
+                    if (conv[h] != 0.0L)
+                        acc[yInc][h] +=
+                            ways * conv[h];
             });
         std::vector<Transfer> table;
         for (int t = 0; t <= maxTotal; ++t)
             for (int h = 0; h <= 8; ++h) {
                 const long double w =
-                    acc[static_cast<std::size_t>(t)][static_cast<std::size_t>(h)];
+                    acc[t][h];
                 if (w != 0.0L) table.push_back(Transfer{h, t, w});
             }
         transfers.push_back(std::move(table));
@@ -380,10 +380,10 @@ inline Probability::ObserveResult Exact::observe(
     // dp 语义：x = 邻居雷数(0..8)，y = 被抓住部分总雷数(0..maxY)，值为方案数。
     const int stride = maxY + 1;
     auto runDp = [&]() -> std::vector<long double> {
-        std::vector<long double> dp(static_cast<std::size_t>(9) * stride, 0.0L);
+        std::vector<long double> dp(9 * stride, 0.0L);
         dp[0 * stride + 0] = 1.0L;
         for (const auto& table : transfers) {
-            std::vector<long double> ndp(static_cast<std::size_t>(9) * stride, 0.0L);
+            std::vector<long double> ndp(9 * stride, 0.0L);
             for (const Transfer& t : table)
                 for (int xv = 0; xv + t.h <= 8; ++xv)
                     for (int yv = 0; yv + t.y <= maxY; ++yv) {
@@ -403,21 +403,21 @@ inline Probability::ObserveResult Exact::observe(
     Polynomial pRest(0, {1.0});
     for (ComponentId cid = 0; cid < static_cast<ComponentId>(structure.components.size());
          ++cid) {
-        const Structure::Instance& inst = structure.components[static_cast<std::size_t>(cid)];
-        if (seen[static_cast<std::size_t>(cid)]) continue;
+        const Structure::Instance& inst = structure.components[cid];
+        if (seen[cid]) continue;
         const Distribution* dist = Distribution::Solver::analyze(*inst.shape, pool);
         pRest = pRest * Polynomial(*dist);
     }
     const int pRestMax =
         pRest.coeffs.empty() ? 0 : pRest.start + static_cast<int>(pRest.coeffs.size()) - 1;
-    std::vector<long double> f(static_cast<std::size_t>(tPool + pRestMax) + 1, 0.0L);
+    std::vector<long double> f(tPool + pRestMax + 1, 0.0L);
     for (std::size_t i = 0; i < pRest.coeffs.size(); ++i) {
         const long double w = pRest.coeffs[i];
         if (w == 0.0L) continue;
         const int t1 = pRest.start + static_cast<int>(i);
         // T 格最多吃 tPool 个雷（r 是 T 格雷数；组件雷数 t1 不受 tPool 限制）
         for (int r = 0; r <= tPool; ++r)
-            f[static_cast<std::size_t>(t1 + r)] += w * combLog(tPool, r);
+            f[t1 + r] += w * combLog(tPool, r);
     }
 
     // ── 步骤 5：dp 与 f 的预算卷积（y + t = M），按邻居雷数分组 ──
@@ -430,7 +430,7 @@ inline Probability::ObserveResult Exact::observe(
             if (d == 0.0L) continue;
             const int t = M - yv;
             if (t < 0 || t > fMax) continue;
-            F[static_cast<std::size_t>(xv)] += d * f[static_cast<std::size_t>(t)];
+            F[xv] += d * f[t];
         }
 
     // ── 步骤 6：explosion —— P(x 是雷) 直接取自 analyze 的雷概率 ──
@@ -441,14 +441,14 @@ inline Probability::ObserveResult Exact::observe(
     // ── 步骤 7：归一化（N = 全盘方案数，T 池子用 tSum，x 允许是雷）──
     Polynomial pAll = pRest;
     for (ComponentId cid : captured) {
-        const Structure::Instance& inst = structure.components[static_cast<std::size_t>(cid)];
+        const Structure::Instance& inst = structure.components[cid];
         const Distribution* dist = Distribution::Solver::analyze(*inst.shape, pool);
         pAll = pAll * Polynomial(*dist);
     }
     const long double N = denominator(pAll, M, tSum);
     for (int xv = 0; xv <= 8 && fixed + xv <= 8; ++xv)
-        out.digit[static_cast<std::size_t>(fixed + xv)] =
-            F[static_cast<std::size_t>(xv)] / N;
+        out.digit[fixed + xv] =
+            F[xv] / N;
     return out;
 }
 

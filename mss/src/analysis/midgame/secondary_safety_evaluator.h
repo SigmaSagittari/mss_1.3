@@ -167,7 +167,7 @@ inline SecondarySafetyEvaluator::Result::Candidate SecondarySafetyEvaluator::eva
     long double safetyThisTileLeft = out.safety;
     bool pruned = false;
     for (int v = 0; v <= 8; ++v) {
-        const long double probV = observation.digit[static_cast<std::size_t>(v)];
+        const long double probV = observation.digit[v];
         if (probV == 0.0L) continue;
 
         // 乐观上界剪枝（Java doFullEvaluateTile 同款）：剩余概率全按 100%
