@@ -47,19 +47,12 @@ struct Probability {
                                     const Structure::Result& structure) const;
 
 
-        // 前沿格筛选的一条记录：坐标 + 雷概率（同盒同值，取 boxProbs）。
-        struct FrontierCell {
-            int x = 0;              // 1-based 行
-            int y = 0;              // 1-based 列
-            long double p = 0;      // 该格雷概率
-        };
-
-        // getter：返回雷概率严格小于 p 的全部前沿格（坐标 + 概率）。
+        // 遍历雷概率全部前沿格，逐项回调 (x, y, probability)。
         // 按块枚举（components.boxProbs，复用 mineProbability 的取数路径），
-        // 不物化整盘网格；概率 ≥ p 的 box 整盒跳过。调用方自排序。
-        std::vector<FrontierCell> frontierCells(const ObservedBoard& board,
-                                                const Structure::Result& structure,
-                                                long double p) const;
+        // 不物化整盘网格；调用方自排序。
+        template <typename Callback>
+        void frontierCells(const ObservedBoard& board, const Structure::Result& structure,
+                           Callback&& callback) const;
     };
 
     // 观察结果：点开格子 x 后的结果分布。
@@ -92,9 +85,10 @@ inline long double Probability::Result::mineProbability(
         static_cast<std::size_t>(loc.box)]);
 }
 
-inline std::vector<Probability::Result::FrontierCell> Probability::Result::frontierCells(
-    const ObservedBoard& board, const Structure::Result& structure, long double p) const {
-    std::vector<FrontierCell> out;
+template <typename Callback>
+inline void Probability::Result::frontierCells(
+    const ObservedBoard& board, const Structure::Result& structure,
+    Callback&& callback) const {
     // 按块枚举：components 下标 = ComponentId，与 structure.components 对齐；
     // boxProbs 的取值路径与 mineProbability 相同（均摊单格概率）。
     for (std::size_t cid = 0; cid < components.size(); ++cid) {
@@ -103,14 +97,12 @@ inline std::vector<Probability::Result::FrontierCell> Probability::Result::front
             structure.components[static_cast<std::size_t>(cid)];
         for (std::size_t b = 0; b < cr.boxProbs.size(); ++b) {
             const long double prob = cr.boxProbs[static_cast<std::size_t>(b)];
-            if (!(prob < p)) continue;  // 整个 box 概率 ≥ p：整盒跳过
             for (std::size_t k = inst.boxes.boxOf[b]; k < inst.boxes.boxOf[b + 1]; ++k) {
                 const auto [x, y] = board.pos(inst.boxes.cells[k]);  // 同 mineProbability 反解
-                out.push_back(FrontierCell{x, y, prob});
+                callback(x, y, prob);
             }
         }
     }
-    return out;
 }
 
 }  // namespace mss
