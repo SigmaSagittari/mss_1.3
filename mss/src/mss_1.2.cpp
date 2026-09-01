@@ -1,5 +1,1 @@
-/*
-int main() {
-    return 0;
-}
-*/
+#include "test/harness.cpp"

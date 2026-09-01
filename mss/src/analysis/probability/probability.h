@@ -23,7 +23,7 @@ namespace mss {
 // ─────────────────────────────────────────────────────────────
 
 struct Probability {
-    static long double exactMineProbability(long double p);
+    static long double limitProbability(long double p);
 
     // 单连通块的小结果。
     struct ComponentResult {
@@ -73,7 +73,7 @@ struct Probability {
 
 // ── 实现区 ──
 // 钳制浮点尾差：p 距 1 在 1e-10 内一律视为 1（整除噪声归零为 1 的误差）。
-inline long double Probability::exactMineProbability(long double p) {
+inline long double Probability::limitProbability(long double p) {
     return p >= 1.0L - 1e-10L ? 1.0L : p;
 }
 
@@ -88,7 +88,7 @@ inline long double Probability::Result::mineProbability(
         return 0.0L;  // Safe / 已揭示数字
     }
     if (loc.box == -1) return 0.0L;  // 约束数字格（已揭示）
-    return Probability::exactMineProbability(components[static_cast<std::size_t>(loc.component)].boxProbs[
+    return Probability::limitProbability(components[static_cast<std::size_t>(loc.component)].boxProbs[
         static_cast<std::size_t>(loc.box)]);
 }
 

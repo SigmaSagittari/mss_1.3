@@ -126,7 +126,7 @@ inline Exact::Polynomial Exact::Polynomial::operator/(const Polynomial& other) c
     const long double otherLeading = other.coeffs.back();
     for (int i = static_cast<int>(rem.size()) - 1;
          i >= static_cast<int>(other.coeffs.size()) - 1; --i) {
-        if (std::abs(rem[static_cast<std::size_t>(i)]) < 1e-12L) continue;
+        if (std::abs(rem[static_cast<std::size_t>(i)]) < 1e-10L) continue;
         const long double factor = rem[static_cast<std::size_t>(i)] / otherLeading;
         const int quotIdx = i - (static_cast<int>(other.coeffs.size()) - 1);
         res[static_cast<std::size_t>(quotIdx)] = factor;
@@ -185,7 +185,7 @@ inline Probability::Result Exact::analyze(const ObservedBoard& board,
             lightProb += pH.coeffs[static_cast<std::size_t>(i)] * combLog(tSum - 1, lightMines);
     }
     lightProb /= denom;
-    result.tCellProbability = Probability::exactMineProbability(lightProb);
+    result.tCellProbability = Probability::limitProbability(lightProb);
     result.candidates = denom;
 
     // 每连通块：各分布的取到概率 → 每 box 的雷概率（均摊）。
