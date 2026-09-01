@@ -100,13 +100,15 @@ inline void logerr(std::string_view message, const ObservedBoard& board,
     } } while (false)
 
 enum class PositionFilter { All, GuessOnly };
-struct GameConfig {
+// 所有真实对局测试共用的采样配置。每个测试只额外声明自身特有的参数。
+struct TestConfig {
     int rows = 16;
     int cols = 30;
     int mines = 99;
+    long long expectedPositions = 10000;
     PositionFilter filter = PositionFilter::All;  // All：全部局面；GuessOnly：只留必须猜的局面
-    int maxRestarts = 10000;                      // 生成一条可赢对局的重试上限
-    bool requireWinningGame = true;
+    int maxRestarts = 10000;                      // requireWinningGame 时生成一条可赢对局的重试上限
+    bool requireWinningGame = false;
     bool firstMoveSafe = false;
 };
 
@@ -114,7 +116,7 @@ struct Game {
     ObservedBoard board;
     std::vector<char> mines;
     int opened = 0;
-    explicit Game(const GameConfig& c) : board(c.rows, c.cols, c.mines),
+    explicit Game(const TestConfig& c) : board(c.rows, c.cols, c.mines),
         mines(static_cast<std::size_t>(c.rows * c.cols), 0) {}
     int flat(int x, int y) const { return (x - 1) * board.cols + (y - 1); }
     bool mine(int x, int y) const { return mines[static_cast<std::size_t>(flat(x, y))] != 0; }
@@ -182,10 +184,10 @@ inline Move lowestRiskMove(const ObservedBoard& board, const Analysis& analysis)
 
 struct Snapshot { const Game& game; const Analysis& analysis; Move next; bool mustGuess = false; };
 
-// 随机雷局按"最低雷概率"策略打完整局；输局丢弃——发出的每个局面都来自
-// 一条完整可赢的对局；数字 0 处连锁翻开。
+// 随机雷局按"最低雷概率"策略游玩；默认采样每个已经历过的真实局面，输局
+// 只会终止当前对局。requireWinningGame 时才丢弃输局并重开；数字 0 处连锁翻开。
 template <typename Fn>
-inline void generateGame(const GameConfig& config, Rng& rng, Fn&& consume) {
+inline void generateGame(const TestConfig& config, Rng& rng, Fn&& consume) {
     if (config.rows <= 0 || config.cols <= 0 || config.mines < 0 ||
         config.mines >= config.rows * config.cols) std::abort();
     for (int restart = 0; restart < config.maxRestarts; ++restart) {

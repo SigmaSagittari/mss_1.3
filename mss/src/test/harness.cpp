@@ -1,17 +1,18 @@
 #include "test/common.h"
+#include "test/basic/flood_probability.h"
 #include "test/performance/real_game_probability.h"
+#include "test/spread/probability.h"
 
 int main() {
     using namespace mss::test;
-    constexpr RealGameProbabilityConfig perf100x100_2183{100, 100, 2183, 70000};
-    constexpr RealGameProbabilityConfig perf100x100_2400{100, 100, 2400, 30000};
-    constexpr RealGameProbabilityConfig perf100x100_2485{100, 100, 2485, 10000};
-    constexpr RealGameProbabilityConfig perf30x30_2500{30, 30, 225, 130000};
+    constexpr TestConfig normal_test{
+        .rows = 30, .cols = 30, .mines = 225, .expectedPositions = 1000000,
+        .firstMoveSafe = true,
+    };
 
     Rng rng(0xC0FFEE12345ULL);
-    //testRealGameProbabilityPerformance(rng, perf100x100_2183);
-    //testRealGameProbabilityPerformance(rng, perf100x100_2400);
-    //testRealGameProbabilityPerformance(rng, perf100x100_2485);
-    testRealGameProbabilityPerformance(rng, perf30x30_2500);
+    //testProbabilitySpread(rng, normal_test);
+    //testBasicFloodProbability(rng, normal_test);
+    testRealGameProbabilityPerformance(rng, normal_test);
     return 0;
 }

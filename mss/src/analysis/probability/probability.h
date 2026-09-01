@@ -20,6 +20,7 @@ namespace mss {
 //
 // 引擎实现：exact.h → Exact（GF 多项式 + binomial）填 Result / ObserveResult，
 // UI 无需区分引擎。整盘网格物化（ProbabilityGrid）归 UI 适配器。
+// 对于逻辑可以判定的格子，mineProbability 一定返回浮点数精确的 0/1。
 // ─────────────────────────────────────────────────────────────
 
 struct Probability {

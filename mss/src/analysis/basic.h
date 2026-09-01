@@ -15,12 +15,12 @@ namespace mss {
 //   数据类（纯数据）：Mark / Result / Update / Delta
 //   算法类（纯空壳）：Analyzer / Updater
 //
-// Analyzer::analyze  全量重建标记：Frontier 升级、雷饱和（数字 == 周围隐藏
-//                    数）、安全饱和（数字 == 周围确定雷数）、合法性校验。
+// Analyzer::analyze  全量重建标记：Frontier 升级后，以数字格为起点泛洪，
+//                    反复执行雷/安全饱和直至无新结论，再做合法性校验。
 // Updater::update    增量更新：只处理"揭示"事件——被翻格标 Safe（已揭示，
 //                    非推理，防止 structure 误当 Frontier）、邻格
-//                    Unknown→Frontier、数字饱和标 Mine；不标 Safe 推理、
-//                    不泛洪。返回携带 old 值的 Delta，供 applyDelta 撤销/重放。
+//                    Unknown→Frontier；再由受影响数字格开始泛洪推导 Mine / Safe。
+//                    返回携带 old 值的 Delta，供 applyDelta 撤销/重放。
 // applyDelta         按 Delta 合入 result；reverse=true 逆序撤销。
 //
 // 层间：update 是公共资产，不绑定在数据实例上；Delta 供搜索树撤销重放
@@ -123,55 +123,60 @@ inline Basic::Result Basic::Analyzer::analyze(const ObservedBoard& state) {
                         result.marks[nx][ny] = Mark::Frontier;
                 });
 
-    // 3. 雷饱和：数字 == 周围隐藏数 → 周围全标 Mine。
+    // 3. 从每个数字格开始泛洪。任一新 Mine / Safe 都会重新检查相邻数字，
+    //    直到雷饱和与安全饱和都不再产生新结论。
+    std::vector<CellId> pending;
+    pending.reserve(static_cast<std::size_t>(n * m));
     for (int i = 1; i <= n; ++i)
         for (int j = 1; j <= m; ++j)
-            if (isNumber(board[i][j])) {
-                int hiddenCount = 0;
-                forEachAdjacent(i, j, n, m, [&](int nx, int ny) {
-                    if (board[nx][ny] == Cell::Hidden) hiddenCount++;
-                });
-                if (hiddenCount == numberValue(board[i][j]))
-                    forEachAdjacent(i, j, n, m, [&](int nx, int ny) {
-                        if (board[nx][ny] == Cell::Hidden)
-                            result.marks[nx][ny] = Mark::Mine;
-                    });
-            }
+            if (isNumber(board[i][j])) pending.push_back(state.id(i, j));
 
-    // 4. 安全饱和：数字 == 周围已定雷数 → 其余未开格标 Safe。
-    for (int i = 1; i <= n; ++i)
-        for (int j = 1; j <= m; ++j)
-            if (isNumber(board[i][j])) {
-                int mineCount = 0;
-                forEachAdjacent(i, j, n, m, [&](int nx, int ny) {
-                    if (result.marks[nx][ny] == Mark::Mine) mineCount++;
-                });
-                if (mineCount == numberValue(board[i][j]))
-                    forEachAdjacent(i, j, n, m, [&](int nx, int ny) {
-                        if (board[nx][ny] == Cell::Hidden && result.marks[nx][ny] != Mark::Mine)
-                            result.marks[nx][ny] = Mark::Safe;
-                    });
-            }
+    for (std::size_t head = 0; head < pending.size(); ++head) {
+        const auto [x, y] = state.pos(pending[head]);
+        int mineCount = 0, candidateCount = 0;
+        forEachAdjacent(x, y, n, m, [&](int nx, int ny) {
+            if (result.marks[nx][ny] == Mark::Mine) ++mineCount;
+            else if (board[nx][ny] == Cell::Hidden && result.marks[nx][ny] != Mark::Safe)
+                ++candidateCount;
+        });
+        const int remaining = numberValue(board[x][y]) - mineCount;
+        if (remaining < 0 || remaining > candidateCount) {
+            result.valid = false;
+            continue;
+        }
+        if (remaining != 0 && remaining != candidateCount) continue;
 
-    // 5. 合法性检验：对每个数字，去掉周围安全格后，
-    //    数字必须落在 [周围确定雷数, 未开格数] 区间内。
+        const Mark mark = remaining == 0 ? Mark::Safe : Mark::Mine;
+        forEachAdjacent(x, y, n, m, [&](int nx, int ny) {
+            if (board[nx][ny] != Cell::Hidden || result.marks[nx][ny] == mark ||
+                result.marks[nx][ny] == Mark::Mine || result.marks[nx][ny] == Mark::Safe)
+                return;
+            result.marks[nx][ny] = mark;
+            forEachAdjacent(nx, ny, n, m, [&](int ax, int ay) {
+                if (isNumber(board[ax][ay])) pending.push_back(state.id(ax, ay));
+            });
+        });
+    }
+
+    // 4. 合法性检验：对每个数字，去掉周围安全格后，
+    //    数字必须落在 [周围确定雷数, 未定格数] 区间内。
     for (int i = 1; i <= n; ++i)
         for (int j = 1; j <= m; ++j)
             if (isNumber(board[i][j])) {
-                int mineCount = 0, openCount = 0;
+                int mineCount = 0, candidateCount = 0;
                 forEachAdjacent(i, j, n, m, [&](int nx, int ny) {
                     if (result.marks[nx][ny] == Mark::Mine) mineCount++;
                     if (board[nx][ny] == Cell::Hidden && result.marks[nx][ny] != Mark::Safe)
-                        openCount++;
+                        if (result.marks[nx][ny] != Mark::Mine) candidateCount++;
                 });
                 const int v = numberValue(board[i][j]);
-                if (v < mineCount || v > openCount) {
+                if (v < mineCount || v > mineCount + candidateCount) {
                     result.valid = false;
                     break;
                 }
             }
 
-    // 6. 统计。
+    // 5. 统计。
     result.unknownSum = result.mineSum = 0;
     for (int i = 1; i <= n; ++i)
         for (int j = 1; j <= m; ++j) {
@@ -192,8 +197,10 @@ inline Basic::Delta Basic::Updater::update(const ObservedBoard& board,
     delta.oldValid = result.valid;
     const int rows = board.rows;
     const int cols = board.cols;
+    std::vector<CellId> pending;
 
-    // 标记某格：就地改 result + 维护统计 + 记录变化（含 old）。同标记跳过。
+    // 标记某格：就地改 result + 维护统计 + 记录变化（含 old）。每次变化都令
+    // 相邻数字重新入队，驱动后续安全/危险格的泛洪判断。
     auto setMark = [&](int x, int y, Mark m) {
         Mark& cur = result.marks[x][y];
         if (cur == m) return;
@@ -204,13 +211,15 @@ inline Basic::Delta Basic::Updater::update(const ObservedBoard& board,
         if (m == Mark::Mine) ++result.mineSum;
         cur = m;
         delta.changes.push_back({board.id(x, y), oldMark, m});
+        forEachAdjacent(x, y, rows, cols, [&](int nx, int ny) {
+            if (isNumber(board.board[nx][ny])) pending.push_back(board.id(nx, ny));
+        });
     };
 
     // 只支持"揭示"类更新（opens 一个隐藏格为数字 0..8）。
     // 回滚（next == Cell::Hidden）已移除：它会解除数字饱和、把已标 Mine 的
     // 格翻回 Frontier，需要第二轮传播（两环）才闭环，破坏"组件原子性"——
-    // 纯揭示世界里事件波及范围 = 事件格 + 八邻域（单环），新标雷必在事件
-    // 所属组件内，单环即闭环。
+    // 纯揭示世界里标记只会单调收敛，数字格队列可将其影响泛洪到整个相关组件。
     for (const Update& u : updates)
         assert_(u.next != Cell::Hidden,
                 "Basic::Updater: 不支持回滚更新（next 必须为数字 0..8）");
@@ -218,25 +227,38 @@ inline Basic::Delta Basic::Updater::update(const ObservedBoard& board,
     for (const Update& u : updates) {
         const auto [x, y] = board.pos(u.cell);
 
-        // 翻开数字：被翻格标 Safe（已揭示，非推理），只加 Frontier / Mine。
+        // 翻开数字：被翻格标 Safe（已揭示，非推理），邻居隐藏格接入前沿。
         setMark(x, y, Mark::Safe);
+        if (isNumber(board.board[x][y])) pending.push_back(u.cell);
         forEachAdjacent(x, y, rows, cols, [&](int nx, int ny) {
             // 邻居隐藏格：Unknown → Frontier。
             if (board.board[nx][ny] == Cell::Hidden && result.marks[nx][ny] == Mark::Unknown)
                 setMark(nx, ny, Mark::Frontier);
+        });
+    }
 
-            // 数字 == 周围隐藏数 → 周围隐藏格全部是雷。
-            if (!isNumber(board.board[nx][ny])) return;
-            int hiddenCount = 0;
-            forEachAdjacent(nx, ny, rows, cols, [&](int ax, int ay) {
-                if (board.board[ax][ay] == Cell::Hidden) ++hiddenCount;
-            });
-            if (hiddenCount != numberValue(board.board[nx][ny])) return;
-            forEachAdjacent(nx, ny, rows, cols, [&](int ax, int ay) {
-                if (board.board[ax][ay] != Cell::Hidden) return;
-                if (result.marks[ax][ay] == Mark::Mine) return;
-                setMark(ax, ay, Mark::Mine);
-            });
+    // 只重算受事件或标记变化影响的数字格；每次新结论会把相邻数字继续入队。
+    for (std::size_t head = 0; head < pending.size(); ++head) {
+        const auto [x, y] = board.pos(pending[head]);
+        int mineCount = 0, candidateCount = 0;
+        forEachAdjacent(x, y, rows, cols, [&](int nx, int ny) {
+            if (result.marks[nx][ny] == Mark::Mine) ++mineCount;
+            else if (board.board[nx][ny] == Cell::Hidden && result.marks[nx][ny] != Mark::Safe)
+                ++candidateCount;
+        });
+        const int remaining = numberValue(board.board[x][y]) - mineCount;
+        if (remaining < 0 || remaining > candidateCount) {
+            result.valid = false;
+            continue;
+        }
+        if (remaining != 0 && remaining != candidateCount) continue;
+
+        const Mark mark = remaining == 0 ? Mark::Safe : Mark::Mine;
+        forEachAdjacent(x, y, rows, cols, [&](int nx, int ny) {
+            if (board.board[nx][ny] != Cell::Hidden || result.marks[nx][ny] == mark ||
+                result.marks[nx][ny] == Mark::Mine || result.marks[nx][ny] == Mark::Safe)
+                return;
+            setMark(nx, ny, mark);
         });
     }
 

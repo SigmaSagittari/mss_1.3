@@ -4,11 +4,13 @@
 
 namespace mss::test {
 
-inline void testProbabilitySpread(Rng& rng, int iter) {
-    GameConfig config;
-    for (int i = 0; i < iter; ++i) {
-        generateGame(config, rng, [](const Snapshot& s) {
-            if (counters().failures != 0) return;
+inline void testProbabilitySpread(Rng& rng, const TestConfig& config) {
+    long long positions = 0;
+    long long games = 0;
+    while (positions < config.expectedPositions && counters().failures == 0) {
+        ++games;
+        generateGame(config, rng, [&](const Snapshot& s) {
+            if (positions == config.expectedPositions || counters().failures != 0) return;
             const auto& board = s.game.board;
             const auto& basic = s.analysis.basic;
             const auto& structure = s.analysis.structure;
@@ -61,8 +63,11 @@ inline void testProbabilitySpread(Rng& rng, int iter) {
             MSS_TEST_CHECK(std::fabs(expectedMines - static_cast<long double>(board.totalMines)) < 1e-9L,
                 "mine-probability sum differs from total mine count", board, &basic, &structure);
             MSS_TEST_CHECK(s.next.x != 0, "unfinished board has no selectable hidden cell", board, &basic, &structure);
+            ++positions;
         });
     }
+    std::cout << "spread/probability: " << positions << " positions from "
+              << games << " games\n";
 }
 
 }  // namespace mss::test
