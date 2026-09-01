@@ -14,7 +14,7 @@ namespace mss {
 //
 //   Result            精确引擎产物，小（按块），非 O(nm) 网格。
 //   mineProbability   单格雷概率查询（只读 getter）。
-//   frontierCells     前沿格筛选（雷概率 < 阈值）：按块枚举，不物化整盘
+//   frontierCells     前沿格遍历：按块枚举，不物化整盘
 //                     网格——比"全盘扫描 + 单格查询"快一个数量级。
 //   ObserveResult     点开某格后的结果分布（observe 引擎产物）。
 //
