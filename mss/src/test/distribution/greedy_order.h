@@ -86,7 +86,7 @@ struct OrderStats {
 // 合法展开顺序：首项为 init；后续每个 box 必须只出现一次，且连接到已经
 // 选择的部分。顺便在线维护并返回该顺序的最大 state width。
 inline bool checkOrder(const DistributionSolver::Graph& graph, BoxId init,
-                       const std::vector<int>& order, int& maxWidth) {
+                       const std::vector<BoxId>& order, int& maxWidth) {
     const int n = static_cast<int>(graph.neighbors.size());
     if (static_cast<int>(order.size()) != n || order[0] != init) return false;
 
@@ -121,8 +121,29 @@ inline bool checkOrder(const DistributionSolver::Graph& graph, BoxId init,
     return true;
 }
 
-// 只采样真实对局中的 Structure component；所有算法用同一个 graph 与同一个
-// 直径端点 init。这里不再对 greedy 的选点质量作任何判断。
+// 友元测试探针：order 产线已全部私有（对应 distribution_graph.h 里的
+// mss::test::OrderProbe 前置声明），两种抛光基准成品只在这里组装。
+struct OrderProbe {
+    static std::vector<BoxId> lexBfsPolished(const DistributionSolver::Graph& graph) {
+        std::vector<BoxId> order = DistributionSolver::lexBfsOrder(
+            graph, DistributionSolver::diameterStart(graph));
+        DistributionSolver::polishAdjacent(graph, order);
+        return order;
+    }
+    static std::vector<BoxId> lexBfsWindow3(const DistributionSolver::Graph& graph) {
+        std::vector<BoxId> order = DistributionSolver::lexBfsOrder(
+            graph, DistributionSolver::diameterStart(graph));
+        DistributionSolver::polishWindow3(graph, order);
+        return order;
+    }
+    // 展开起点（= 旧 findDiameter().first，行为不变）。
+    static BoxId start(const DistributionSolver::Graph& graph) {
+        return DistributionSolver::diameterStart(graph);
+    }
+};
+
+// 只采样真实对局中的 Structure component；两种抛光成品共用同一个 graph、
+// 同一个展开基序（lexBfsOrder）与同一个直径端点 init。
 inline void testDistributionOrders(Rng& rng, const TestConfig& config) {
     long long positions = 0;
     long long games = 0;
@@ -140,7 +161,7 @@ inline void testDistributionOrders(Rng& rng, const TestConfig& config) {
             for (const Structure::Instance& instance : snapshot.analysis.structure.components) {
                 const DistributionSolver::Graph graph = makeGreedyOrderGraph(*instance.shape);
                 const int n = static_cast<int>(graph.neighbors.size());
-                const BoxId init = DistributionSolver::findDiameter(graph).first;
+                const BoxId init = OrderProbe::start(graph);
                 auto check = [&](const char* name, const std::vector<BoxId>& order, OrderStats& stats,
                                  int& maxWidth) {
                     ++counters().checks;
@@ -159,7 +180,7 @@ inline void testDistributionOrders(Rng& rng, const TestConfig& config) {
                 };
                 int maxWidth = 0;
                 const std::vector<BoxId> lexBfsPolishedOrder =
-                    DistributionSolver::lexBfsPolishedOrder(graph, init);
+                    OrderProbe::lexBfsPolished(graph);
                 if (!check("lex-bfs-polished", lexBfsPolishedOrder, lexBfsPolishedStats,
                            maxWidth)) return;
                 if (maxWidth > greatestWidth) {
@@ -168,7 +189,7 @@ inline void testDistributionOrders(Rng& rng, const TestConfig& config) {
                     greatestWidthBoard = snapshot.game.board;
                 }
                 const std::vector<BoxId> lexBfsWindow3Order =
-                    DistributionSolver::lexBfsWindow3Order(graph, init);
+                    OrderProbe::lexBfsWindow3(graph);
                 if (!check("lex-bfs-window3", lexBfsWindow3Order, lexBfsWindow3Stats,
                            maxWidth)) return;
                 if (maxWidth > greatestWidth) {

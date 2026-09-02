@@ -13,11 +13,16 @@
 #include "analysis/structure.h"
 #include "core/assert.h"
 #include "core/types.h"
-#include "core/utility/bit_flag_set.h"
 #include "core/utility/flat_hashtable.h"
 #include "core/utility/hash.h"
 
 namespace mss {
+
+// 测试专用访问口（友元）：实现定义于 test/distribution/greedy_order.h。
+// 生产构建（不含测试）下该名字只保持前置声明，不生成任何代码。
+namespace test {
+struct OrderProbe;
+}  // namespace test
 
 // ─────────────────────────────────────────────────────────────
 // distribution_graphv.h — 基于图分解的组件分布求解（设计稿）。
@@ -111,7 +116,14 @@ struct DistributionSolver {
         FlatHashTable<U128, const Distribution*, U128Hash> index_;
     };
 
+    // ── 展开序 ──
+    // 展开恒用 lexBfsOrder（起点经 diameterStart 选取）；抛光方式由 analyze
+    // 的模板枚举在编译期选定，默认相邻抛光。抛光实现保持私有，测试经友元
+    // OrderProbe 组装两种抛光基准。
+    enum class PolishKind { Adjacent, Window3 };
+
     // 汇总分布表（forEachAssignment 聚合），经 DistPool 去重缓存。
+    template <PolishKind polish = PolishKind::Adjacent>
     static const Distribution* analyze(const Structure::Shape& shape, DistPool& pool);
 
     struct Graph {
@@ -119,17 +131,17 @@ struct DistributionSolver {
         std::vector<std::vector<BoxId>> neighbors;
     };
 
-    static std::vector<BoxId> lexBfsPolishedOrder(const Graph& graph, BoxId init);
-    static std::vector<BoxId> lexBfsWindow3Order(const Graph& graph, BoxId init);
-
-    // 两次 DFS sweep 选出 greedy 展开的起始端点。
-    static std::pair<BoxId, BoxId> findDiameter(const Graph& graph);
-
 private:
-    static std::vector<int> greedyOrder(const Graph& graph, BoxId init);
+    // 展开起点：从 box 0 出发的 DFS 最远端点（启发式；原"双扫"的第二段
+    // 端点无人使用，已删）。
+    static BoxId diameterStart(const Graph& graph);
+
     static std::vector<BoxId> lexBfsOrder(const Graph& graph, BoxId init);
     static void polishAdjacent(const Graph& graph, std::vector<BoxId>& order, int rounds = 2);
     static void polishWindow3(const Graph& graph, std::vector<BoxId>& order);
+
+    // 测试访问口：定义于 test/distribution/greedy_order.h。
+    friend struct test::OrderProbe;
 
     // 组合数 C(n,k)：编译时查表。box 规模 ≤ 8（同一数字邻域集合的隐藏格
     // 都在该组任一数字的 8 邻域内）。
@@ -173,12 +185,17 @@ inline long double DistributionSolver::binom(int n, int k) {
         return t;
         }();
 
-    // 调用方（forEachAssignment）保证 0<=k<=n<=box.size<=kMax；越界=结构 bug。
+    // 调用方保证 0<=k<=n<=box.size<=kMax；越界=结构 bug。
     assert_(k >= 0 && k <= n && n <= kMax, "Distribution:binom: 参数越界");
+#if defined(_MSC_VER) && defined(_PREFAST_)
+    // /analyze 无法从 assert_（普通函数）推断数组下界，这里显式告知
+    // 分析器边界成立（仅代码分析时生效，不生成任何代码）。
+    __analysis_assume(k >= 0 && k <= n && n <= kMax);
+#endif
     return kComb[n][k];
 }
 
-inline std::pair<BoxId, BoxId> DistributionSolver::findDiameter(const Graph& graph) {
+inline BoxId DistributionSolver::diameterStart(const Graph& graph) {
     auto farthest = [&graph](BoxId start) {
         std::vector<char> visited(graph.neighbors.size(), 0);
         BoxId farthestNode = start;
@@ -199,9 +216,7 @@ inline std::pair<BoxId, BoxId> DistributionSolver::findDiameter(const Graph& gra
         return farthestNode;
     };
 
-    const BoxId first = farthest(0);
-    const BoxId second = farthest(first);
-    return {first, second};
+    return farthest(0);
 }
 
 inline std::vector<BoxId> DistributionSolver::lexBfsOrder(const Graph& graph, BoxId init) {
@@ -414,89 +429,9 @@ inline void DistributionSolver::polishWindow3(const Graph& graph, std::vector<Bo
     }
 }
 
-inline std::vector<BoxId> DistributionSolver::lexBfsPolishedOrder(const Graph& graph,
-                                                                    BoxId init) {
-    std::vector<BoxId> order = lexBfsOrder(graph, init);
-    polishAdjacent(graph, order);
-    return order;
-}
 
-inline std::vector<BoxId> DistributionSolver::lexBfsWindow3Order(const Graph& graph,
-                                                                   BoxId init) {
-    std::vector<BoxId> order = lexBfsOrder(graph, init);
-    polishWindow3(graph, order);
-    return order;
-}
 
-inline std::vector<int> DistributionSolver::greedyOrder(const Graph& graph, BoxId init) {
-    const int n = static_cast<int>(graph.neighbors.size());
-    // selected：已放入顺序的 box。其余 box 均是未选择的 box。
-    std::vector<char> selected(n, 0);
-    // unselectedNeighbors[u]：u 当前还连接多少未选择 box。
-    std::vector<int> unselectedNeighbors(n, 0);
-    // unselectedNeighborXor[u]：u 所有未选择邻居的 BoxId 异或值。
-    // 当只剩一个未选择邻居时，它本身就是这个异或值。
-    std::vector<BoxId> unselectedNeighborXor(n, 0);
-    // closesSelected[u]：若下一步选择 u，能让多少已选择 box 彻底脱离边界。
-    std::vector<int> closesSelected(n, 0);
-    std::vector<int> score(n, 0);
-    int maxDegree = 0;
-    std::vector<int> order;
-    order.reserve(n);
-    for (int i = 0; i < n; ++i) {
-        unselectedNeighbors[i] = static_cast<int>(graph.neighbors[i].size());
-        maxDegree = std::max(maxDegree, unselectedNeighbors[i]);
-        for (BoxId neighbor : graph.neighbors[i])
-            unselectedNeighborXor[i] ^= neighbor;
-    }
-    // score 在 [-maxDegree, 1] 中；扫雷 box 图的 maxDegree 不超过 56，故全部
-    // 映射进 BitFlagSet 的 64 个 bucket。BitFlagSet 的成员就是未选择的前沿 box。
-    BitFlagSet candidates;
-    candidates.reset(n);
-
-    // 每轮都直接展开一个已选点周围的局部变化。这里没有“上下游”：只有
-    // 已选择与未选择。一个已选择 box 只有在不存在未选择邻居时才离开边界。
-    BoxId box = init;
-    while (true) {
-        selected[box] = 1;
-        order.push_back(box);
-
-        for (BoxId neighbor : graph.neighbors[box]) {
-            // box 刚从未选择变为已选择；每个邻居都少了一个未选择邻居。
-            --unselectedNeighbors[neighbor];
-            unselectedNeighborXor[neighbor] ^= box;
-            if (selected[neighbor]) {
-                // neighbor 从“还连两个未选择点”变为“只连一个未选择点”。
-                // 未选择邻居的异或值此时就是唯一的 last。
-                if (unselectedNeighbors[neighbor] == 1) {
-                    const BoxId last = unselectedNeighborXor[neighbor];
-                    candidates.erase(last);
-                    ++closesSelected[last];
-                    score[last] = (unselectedNeighbors[last] != 0) - closesSelected[last];
-                    candidates.insert(last, score[last] + maxDegree);
-                }
-            } else {
-                // neighbor 仍未选择；它现在已连接已选择部分，成为候选。
-                if (candidates.contains(neighbor)) candidates.erase(neighbor);
-                score[neighbor] = (unselectedNeighbors[neighbor] != 0) - closesSelected[neighbor];
-                candidates.insert(neighbor, score[neighbor] + maxDegree);
-            }
-        }
-
-        // box 自己刚变为已选择。若它只剩一个未选择邻居，那个点日后会关闭 box。
-        if (unselectedNeighbors[box] == 1) {
-            const BoxId last = unselectedNeighborXor[box];
-            candidates.erase(last);
-            ++closesSelected[last];
-            score[last] = (unselectedNeighbors[last] != 0) - closesSelected[last];
-            candidates.insert(last, score[last] + maxDegree);
-        }
-        if (static_cast<int>(order.size()) == n) break;
-        box = candidates.popFirst();
-    }
-    return order;
-}
-
+template <DistributionSolver::PolishKind polish>
 inline const DistributionSolver::Distribution* DistributionSolver::analyze(const Structure::Shape& shape, DistributionSolver::DistPool& pool) {
     Graph graph;
     graph.neighbors.resize(shape.boxes.size());
@@ -520,13 +455,20 @@ inline const DistributionSolver::Distribution* DistributionSolver::analyze(const
         }
     }
 
-    const auto diameter = findDiameter(graph);
-    const std::vector<int> order = greedyOrder(graph, diameter.first);
+    // 展开恒用 lexBfsOrder；抛光方式由模板参数在编译期选定。
+    const BoxId init = diameterStart(graph);
+    std::vector<BoxId> order = lexBfsOrder(graph, init);
+    if constexpr (polish == PolishKind::Adjacent) {
+        polishAdjacent(graph, order);
+    } else {
+        polishWindow3(graph, order);
+    }
 
-    std::cout << "distribution/greedy-order: boxes=" << shape.boxes.size()
-              << ", diameter=" << diameter.first << '-' << diameter.second
+    std::cout << "distribution/lex-bfs-order: boxes=" << shape.boxes.size()
+              << ", start=" << init
+              << ", polish=" << (polish == PolishKind::Adjacent ? "adjacent" : "window3")
               << "\n  order:";
-    for (int box : order) std::cout << ' ' << box;
+    for (BoxId box : order) std::cout << ' ' << box;
     std::cout << '\n';
     return pool.get(&shape);
 }
