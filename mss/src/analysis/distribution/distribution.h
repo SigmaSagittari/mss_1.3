@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "analysis/basic.h"
+#include "analysis/distribution/distribution_graph.h"
 #include "analysis/structure.h"
 #include "core/assert.h"
 #include "core/types.h"
@@ -50,10 +51,12 @@ struct Distribution {
         const Distribution* get(const Structure::Shape* shape);
         const Distribution* get(const Structure::Shape* shape) const;
         const Distribution* insert(const Structure::Shape* shape, Distribution dist);
+        DistributionSolver::DistPool& graphPool() { return graphPool_; }
 
     private:
         std::vector<std::unique_ptr<Distribution>> dists_;  // 稳定地址，只增不删
         FlatHashTable<U128, const Distribution*, U128Hash> index_;
+        DistributionSolver::DistPool graphPool_;
     };
 
     // ── 算法类（纯空壳）──
@@ -201,37 +204,15 @@ inline const Distribution* Distribution::Solver::analyze(const Structure::Shape&
                                                          DistPool& pool) {
     if (const Distribution* cached = pool.get(&shape)) return cached;
 
-    const int n = static_cast<int>(shape.boxes.size());
-    int maxTotal = 0;
-    for (const auto& box : shape.boxes) maxTotal += box.size;
-
-    // 线程局部复用工作区（analyze 非重入、无并发）：避免每块新建嵌套 vector。
-    static thread_local std::vector<long double> wayTable;
-    static thread_local std::vector<long double> expectFlat;
-    wayTable.assign(maxTotal + 1, 0.0L);
-    expectFlat.assign((maxTotal + 1) * n, 0.0L);
-
-    forEachAssignment(shape, [&](const std::vector<char>& assignment, long double ways) {
-        int total = 0;
-        for (int i = 0; i < n; ++i) total += assignment[i];
-        wayTable[total] += ways;
-        const std::size_t row = total * n;
-        for (int i = 0; i < n; ++i)
-            expectFlat[row + i] +=
-                ways * assignment[i];
-    });
-
+    const DistributionSolver::Distribution* graph =
+        DistributionSolver::analyze(shape, pool.graphPool());
     Distribution dist;
-    for (int total = 0; total <= maxTotal; ++total) {
-        if (wayTable[total] == 0) continue;
+    dist.entries.reserve(graph->entries.size());
+    for (const DistributionSolver::Distribution::Entry& graphEntry : graph->entries) {
         Entry e;
-        e.mineCount = total;
-        e.ways = wayTable[total];
-        const std::size_t row = total * n;
-        e.perBoxExpectation.resize(n);
-        for (int i = 0; i < n; ++i)
-            e.perBoxExpectation[i] =
-                expectFlat[row + i] / e.ways;
+        e.mineCount = graphEntry.mineCount;
+        e.ways = graphEntry.ways;
+        e.perBoxExpectation = graphEntry.perBoxExpectation;
         dist.entries.push_back(std::move(e));
     }
 

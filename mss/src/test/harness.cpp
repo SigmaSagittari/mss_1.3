@@ -1,3 +1,5 @@
+#include <chrono>
+
 #include "test/common.h"
 #include "test/basic/flood_probability.h"
 #include "test/distribution/greedy_order.h"
@@ -7,14 +9,25 @@
 int main() {
     using namespace mss::test;
     constexpr TestConfig normal_test{
-        .rows = 30, .cols = 30, .mines = 225, .expectedPositions = 10000000,
+        .rows = 30, .cols = 30, .mines = 225,
         .firstMoveSafe = true,
     };
 
     Rng rng(0xC0FFEE12345ULL);
-    //testProbabilitySpread(rng, normal_test);
-    //testBasicFloodProbability(rng, normal_test);
-    testDistributionOrders(rng, normal_test);
-    //testRealGameProbabilityPerformance(rng, normal_test);
+    const auto start = std::chrono::steady_clock::now();
+    const auto deadline = start + std::chrono::seconds(20);
+    long long positions = 0;
+    long long games = 0;
+    while (std::chrono::steady_clock::now() < deadline) {
+        ++games;
+        generateGame(normal_test, rng, [&](const Snapshot&) {
+            if (std::chrono::steady_clock::now() < deadline) ++positions;
+        });
+    }
+    const double seconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - start).count();
+    std::cout << "performance/graph-real-game: " << positions << " positions from "
+              << games << " games, " << seconds << "s, " << positions / seconds
+              << " positions/s\n";
     return 0;
 }

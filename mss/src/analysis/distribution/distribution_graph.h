@@ -201,11 +201,9 @@ private:
             struct DpState {
                 int mineCount = 0;        // 已赋值 box 的雷数总和，末层即 t
                 std::vector<char> mines;  // 定长 n，槽 = boxId
+                U128 hash = {};
 
-                bool operator==(const DpState& other) const;
-                struct DpStateHash {
-                    std::size_t operator()(const DpState& s) const;
-                };
+                void updateHash();
             };
 
             // ways：该状态累计的摆法权重（已赋值 box 的组合数乘积）。
@@ -216,7 +214,15 @@ private:
                 std::vector<long double> mineCounts;
             };
 
-            FlatHashTable<DpState, DpValue, DpState::DpStateHash> map;
+            struct StateValue {
+                DpState state;
+                DpValue value;
+            };
+
+            // FlatHashTable 只提供查找/插入，不提供遍历。状态与统计量连续保存，
+            // hash → 下标只作合并索引，避免哈希表 rehash 深拷贝 DpValue。
+            FlatHashTable<U128, std::size_t, U128Hash> index;
+            std::vector<StateValue> states;
         };
 
         // 内层检查一个约束所需的全部数据（外层逐层构造）。
@@ -230,9 +236,8 @@ private:
         // remAfter = 处理完 v 后本约束仍未赋值的成员 size 之和（不含
         // v），由成员在 order 中的位置静态求出。
         struct Check {
-            std::vector<BoxId> members;  // 该约束的全体成员 boxId
-            int sum = 0;                 // 约束目标雷数
-            int remAfter = 0;            // 处理后剩余成员的 size 和，0 = 封口
+            const Structure::Shape::Constraint* constraint = nullptr;
+            int remAfter = 0;  // 处理后剩余成员的 size 和，0 = 封口
         };
 
         // 单层转移：before（层 k 表）→ 新表（层 k+1）。
@@ -300,6 +305,135 @@ inline long double DistributionSolver::binom(int n, int k) {
     __analysis_assume(k >= 0 && k <= n && n <= kMax);
 #endif
     return kComb[n][k];
+}
+
+inline void DistributionSolver::dpHelper::Layer::DpState::updateHash() {
+    U128Hasher hasher;
+    hasher.mix(mineCount);
+    for (char mine : mines)
+        hasher.mix(static_cast<std::uint64_t>(static_cast<unsigned char>(mine)));
+    hash = hasher.finalize();
+}
+
+inline DistributionSolver::dpHelper::Layer DistributionSolver::dpHelper::newBox(
+    const Layer& before, BoxId v, int boxSize, const std::vector<BoxId>& closed,
+    const std::vector<Check>& checks) const {
+    Layer after;
+    after.index.reserve(before.states.size() * static_cast<std::size_t>(boxSize + 1));
+    after.states.reserve(before.states.size() * static_cast<std::size_t>(boxSize + 1));
+
+    for (const Layer::StateValue& current : before.states) {
+        const Layer::DpState& state = current.state;
+        const Layer::DpValue& value = current.value;
+
+        int minMine = 0;
+        int maxMine = boxSize;
+        for (const Check& check : checks) {
+            int partial = 0;
+            for (BoxId member : check.constraint->boxIds)
+                partial += state.mines[member];
+            minMine = std::max(minMine, check.constraint->sum - partial - check.remAfter);
+            maxMine = std::min(maxMine, check.constraint->sum - partial);
+        }
+
+        for (int mine = minMine; mine <= maxMine; ++mine) {
+            Layer::DpState next = state;
+            next.mineCount += mine;
+            next.mines[v] = static_cast<char>(mine);
+
+            const long double factor = DistributionSolver::binom(boxSize, mine);
+            Layer::DpValue nextValue;
+            nextValue.ways = value.ways * factor;
+            nextValue.mineCounts.resize(next.mines.size());
+            for (std::size_t b = 0; b < next.mines.size(); ++b)
+                nextValue.mineCounts[b] = value.mineCounts[b] * factor;
+
+            for (BoxId box : closed) {
+                nextValue.mineCounts[box] += next.mines[box] * nextValue.ways;
+                next.mines[box] = 0;
+            }
+            next.updateHash();
+
+            if (const std::size_t* found = after.index.find(next.hash)) {
+                Layer::DpValue& merged = after.states[*found].value;
+                merged.ways += nextValue.ways;
+                for (std::size_t b = 0; b < merged.mineCounts.size(); ++b)
+                    merged.mineCounts[b] += nextValue.mineCounts[b];
+            } else {
+                const std::size_t id = after.states.size();
+                after.states.push_back({std::move(next), std::move(nextValue)});
+                after.index.emplace(after.states.back().state.hash, id);
+            }
+        }
+    }
+
+    return after;
+}
+
+inline DistributionSolver::Distribution DistributionSolver::dpHelper::analysis(
+    const std::vector<BoxId>& order, const Structure::Shape& shape) {
+    const int boxCount = static_cast<int>(shape.boxes.size());
+    std::vector<int> position(boxCount);
+    for (int step = 0; step < boxCount; ++step)
+        position[order[step]] = step;
+
+    std::vector<int> closeStep = position;
+    std::vector<std::vector<Check>> checksByStep(boxCount);
+    for (const Structure::Shape::Constraint& constraint : shape.constraints) {
+        int lastStep = -1;
+        for (BoxId box : constraint.boxIds)
+            lastStep = std::max(lastStep, position[box]);
+        for (BoxId box : constraint.boxIds)
+            closeStep[box] = std::max(closeStep[box], lastStep);
+
+        for (BoxId box : constraint.boxIds) {
+            Check check;
+            check.constraint = &constraint;
+            for (BoxId member : constraint.boxIds)
+                if (position[member] > position[box])
+                    check.remAfter += shape.boxes[member].size;
+            checksByStep[position[box]].push_back(std::move(check));
+        }
+    }
+
+    std::vector<std::vector<BoxId>> closedByStep(boxCount);
+    for (BoxId box = 0; box < boxCount; ++box)
+        closedByStep[closeStep[box]].push_back(box);
+
+    Layer layer;
+    Layer::DpState initial;
+    initial.mines.assign(boxCount, 0);
+    initial.updateHash();
+    Layer::DpValue initialValue;
+    initialValue.ways = 1.0L;
+    initialValue.mineCounts.assign(boxCount, 0.0L);
+    layer.states.push_back({std::move(initial), std::move(initialValue)});
+    layer.index.emplace(layer.states.back().state.hash, 0);
+
+    for (int step = 0; step < boxCount; ++step) {
+        const BoxId box = order[step];
+        layer = newBox(layer, box, shape.boxes[box].size, closedByStep[step],
+                       checksByStep[step]);
+    }
+
+    std::sort(layer.states.begin(), layer.states.end(),
+              [](const Layer::StateValue& lhs, const Layer::StateValue& rhs) {
+                  return lhs.state.mineCount < rhs.state.mineCount;
+              });
+
+    Distribution result;
+    for (const Layer::StateValue& stateValue : layer.states) {
+        const Layer::DpState& state = stateValue.state;
+        const Layer::DpValue& value = stateValue.value;
+        Distribution::Entry entry;
+        entry.mineCount = state.mineCount;
+        entry.ways = value.ways;
+        entry.perBoxExpectation.resize(boxCount);
+        for (int box = 0; box < boxCount; ++box)
+            entry.perBoxExpectation[box] = value.mineCounts[box] / value.ways;
+        result.entries.push_back(std::move(entry));
+    }
+    return result;
 }
 
 inline BoxId DistributionSolver::Graph::diameterStart() const {
@@ -550,6 +684,8 @@ inline std::vector<BoxId> DistributionSolver::Graph::polishWindow3(BoxId init) c
 
 template <DistributionSolver::PolishKind polish>
 inline const DistributionSolver::Distribution* DistributionSolver::analyze(const Structure::Shape& shape, DistributionSolver::DistPool& pool) {
+    if (const Distribution* cached = pool.get(&shape)) return cached;
+
     Graph graph;
     graph.neighbors.resize(shape.boxes.size());
     static thread_local FlatHashTable<U128, char, U128Hash> edgeSet;
@@ -582,13 +718,8 @@ inline const DistributionSolver::Distribution* DistributionSolver::analyze(const
         order = graph.polishWindow3(init);
     }
 
-    std::cout << "distribution/lex-bfs-order: boxes=" << shape.boxes.size()
-              << ", start=" << init
-              << ", polish=" << (polish == PolishKind::Adjacent ? "adjacent" : "window3")
-              << "\n  order:";
-    for (BoxId box : order) std::cout << ' ' << box;
-    std::cout << '\n';
-    return pool.get(&shape);
+    dpHelper helper;
+    return pool.insert(&shape, helper.analysis(order, shape));
 }
 
 
