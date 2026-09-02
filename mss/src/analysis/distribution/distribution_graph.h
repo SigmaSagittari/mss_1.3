@@ -2,9 +2,10 @@
 
 #include <algorithm>
 #include <array>
+#include <climits>
 #include <iostream>
+#include <list>
 #include <memory>
-#include <set>
 #include <utility>
 #include <vector>
 
@@ -12,6 +13,7 @@
 #include "analysis/structure.h"
 #include "core/assert.h"
 #include "core/types.h"
+#include "core/utility/bit_flag_set.h"
 #include "core/utility/flat_hashtable.h"
 #include "core/utility/hash.h"
 
@@ -117,12 +119,18 @@ struct DistributionSolver {
         std::vector<std::vector<BoxId>> neighbors;
     };
 
-    // 从 init 出发，逐个选择 box。每次从候选中选取使已选择 / 未选择
-    // 分界上 box 数量变化最小的点；返回按选择先后排列的 BoxId。
-    static std::vector<int> greedyOrder(const Graph& graph, BoxId init);
+    static std::vector<BoxId> lexBfsPolishedOrder(const Graph& graph, BoxId init);
+    static std::vector<BoxId> lexBfsWindow3Order(const Graph& graph, BoxId init);
+
+    // 两次 DFS sweep 选出 greedy 展开的起始端点。
+    static std::pair<BoxId, BoxId> findDiameter(const Graph& graph);
 
 private:
-    static std::pair<BoxId, BoxId> findDiameter(const Graph& graph);
+    static std::vector<int> greedyOrder(const Graph& graph, BoxId init);
+    static std::vector<BoxId> lexBfsOrder(const Graph& graph, BoxId init);
+    static void polishAdjacent(const Graph& graph, std::vector<BoxId>& order, int rounds = 2);
+    static void polishWindow3(const Graph& graph, std::vector<BoxId>& order);
+
     // 组合数 C(n,k)：编译时查表。box 规模 ≤ 8（同一数字邻域集合的隐藏格
     // 都在该组任一数字的 8 邻域内）。
     static long double binom(int n, int k);
@@ -196,77 +204,295 @@ inline std::pair<BoxId, BoxId> DistributionSolver::findDiameter(const Graph& gra
     return {first, second};
 }
 
+inline std::vector<BoxId> DistributionSolver::lexBfsOrder(const Graph& graph, BoxId init) {
+    const int n = static_cast<int>(graph.neighbors.size());
+
+    using VertexList = std::list<BoxId>;
+
+    struct Cell {
+        VertexList vertices;
+        int id = -1;
+        int stamp = -1;
+    };
+
+    using Cells = std::list<Cell>;
+    using CellIt = Cells::iterator;
+    using VertexIt = VertexList::iterator;
+
+    Cells cells(1);
+    CellIt first = cells.begin();
+    first->id = 0;
+
+    std::vector<CellIt> cellOf(n);
+    std::vector<VertexIt> position(n);
+    std::vector<CellIt> splitCell(1, first);
+    std::vector<char> colored(n, false);
+    std::vector<BoxId> order;
+    order.reserve(n);
+
+    for (BoxId v = 0; v < n; ++v) {
+        first->vertices.push_back(v);
+        cellOf[v] = first;
+        position[v] = std::prev(first->vertices.end());
+    }
+
+    for (int step = 0; step < n; ++step) {
+        CellIt selectedCell;
+        BoxId v;
+
+        if (step == 0) {
+            v = init;
+            selectedCell = cellOf[v];
+        } else {
+            selectedCell = cells.begin();
+            v = selectedCell->vertices.front();
+        }
+
+        selectedCell->vertices.erase(position[v]);
+        colored[v] = true;
+        order.push_back(v);
+
+        std::vector<CellIt> touched;
+
+        for (const BoxId u : graph.neighbors[v]) {
+            if (colored[u]) continue;
+
+            CellIt oldCell = cellOf[u];
+
+            if (oldCell->stamp != step) {
+                CellIt newCell = cells.insert(oldCell, Cell{});
+                newCell->id = static_cast<int>(splitCell.size());
+                splitCell.push_back(newCell);
+
+                oldCell->stamp = step;
+                splitCell[oldCell->id] = newCell;
+                touched.push_back(oldCell);
+            }
+
+            CellIt newCell = splitCell[oldCell->id];
+            newCell->vertices.splice(newCell->vertices.end(), oldCell->vertices, position[u]);
+            cellOf[u] = newCell;
+        }
+
+        if (selectedCell->stamp != step && selectedCell->vertices.empty())
+            cells.erase(selectedCell);
+
+        for (CellIt oldCell : touched)
+            if (oldCell->vertices.empty()) cells.erase(oldCell);
+    }
+
+    return order;
+}
+
+inline void DistributionSolver::polishAdjacent(const Graph& graph, std::vector<BoxId>& order,
+                                                int rounds) {
+    const int n = static_cast<int>(order.size());
+
+    for (int round = 0; round < rounds; ++round) {
+        std::vector<int> rem(n);
+        std::vector<char> colored(n, false);
+
+        for (BoxId v = 0; v < n; ++v)
+            rem[v] = static_cast<int>(graph.neighbors[v].size());
+
+        auto delta = [&](BoxId v) {
+            int closed = 0;
+
+            for (const BoxId u : graph.neighbors[v])
+                if (colored[u] && rem[u] == 1) ++closed;
+
+            return static_cast<int>(rem[v] != 0) - closed;
+        };
+
+        auto color = [&](BoxId v) {
+            colored[v] = true;
+
+            for (const BoxId u : graph.neighbors[v]) --rem[u];
+        };
+
+        for (int i = 0; i + 1 < n; ++i) {
+            const BoxId a = order[i];
+            const BoxId b = order[i + 1];
+
+            const bool bIsAvailableBeforeA =
+                static_cast<int>(graph.neighbors[b].size()) > rem[b];
+
+            if (bIsAvailableBeforeA && delta(b) < delta(a))
+                std::swap(order[i], order[i + 1]);
+
+            color(order[i]);
+        }
+
+        color(order.back());
+    }
+}
+
+inline void DistributionSolver::polishWindow3(const Graph& graph, std::vector<BoxId>& order) {
+    const int n = static_cast<int>(order.size());
+
+    std::vector<int> rem(n);
+    std::vector<char> colored(n, false);
+
+    for (BoxId v = 0; v < n; ++v)
+        rem[v] = static_cast<int>(graph.neighbors[v].size());
+
+    auto delta = [&](BoxId v) {
+        int closed = 0;
+
+        for (const BoxId u : graph.neighbors[v])
+            if (colored[u] && rem[u] == 1) ++closed;
+
+        return static_cast<int>(rem[v] != 0) - closed;
+    };
+
+    auto color = [&](BoxId v) {
+        colored[v] = true;
+
+        for (const BoxId u : graph.neighbors[v]) --rem[u];
+    };
+
+    auto uncolor = [&](BoxId v) {
+        for (const BoxId u : graph.neighbors[v]) ++rem[u];
+
+        colored[v] = false;
+    };
+
+    int bad = delta(order[0]);
+    color(order[0]);
+
+    for (int i = 1; i < n; i += 3) {
+        const int length = std::min(3, n - i);
+
+        std::array<BoxId, 3> candidate{};
+        for (int j = 0; j < length; ++j)
+            candidate[j] = order[i + j];
+
+        std::sort(candidate.begin(), candidate.begin() + length);
+
+        std::array<BoxId, 3> best{};
+        int bestPeak = INT_MAX;
+        int bestArea = INT_MAX;
+
+        do {
+            int localBad = bad;
+            int peak = bad;
+            int area = 0;
+            int applied = 0;
+            bool valid = true;
+
+            for (int j = 0; j < length; ++j) {
+                const BoxId v = candidate[j];
+
+                if (static_cast<int>(graph.neighbors[v].size()) == rem[v]) {
+                    valid = false;
+                    break;
+                }
+
+                localBad += delta(v);
+                peak = std::max(peak, localBad);
+                area += localBad;
+
+                color(v);
+                ++applied;
+            }
+
+            for (int j = applied - 1; j >= 0; --j)
+                uncolor(candidate[j]);
+
+            if (valid && std::pair{peak, area} < std::pair{bestPeak, bestArea}) {
+                bestPeak = peak;
+                bestArea = area;
+                best = candidate;
+            }
+        } while (std::next_permutation(candidate.begin(), candidate.begin() + length));
+
+        for (int j = 0; j < length; ++j) {
+            order[i + j] = best[j];
+            bad += delta(best[j]);
+            color(best[j]);
+        }
+    }
+}
+
+inline std::vector<BoxId> DistributionSolver::lexBfsPolishedOrder(const Graph& graph,
+                                                                    BoxId init) {
+    std::vector<BoxId> order = lexBfsOrder(graph, init);
+    polishAdjacent(graph, order);
+    return order;
+}
+
+inline std::vector<BoxId> DistributionSolver::lexBfsWindow3Order(const Graph& graph,
+                                                                   BoxId init) {
+    std::vector<BoxId> order = lexBfsOrder(graph, init);
+    polishWindow3(graph, order);
+    return order;
+}
+
 inline std::vector<int> DistributionSolver::greedyOrder(const Graph& graph, BoxId init) {
     const int n = static_cast<int>(graph.neighbors.size());
     // selected：已放入顺序的 box。其余 box 均是未选择的 box。
     std::vector<char> selected(n, 0);
-    // candidate：未选择、但至少连接一个已选择 box 的 box。
-    std::vector<char> candidate(n, 0);
     // unselectedNeighbors[u]：u 当前还连接多少未选择 box。
     std::vector<int> unselectedNeighbors(n, 0);
+    // unselectedNeighborXor[u]：u 所有未选择邻居的 BoxId 异或值。
+    // 当只剩一个未选择邻居时，它本身就是这个异或值。
+    std::vector<BoxId> unselectedNeighborXor(n, 0);
     // closesSelected[u]：若下一步选择 u，能让多少已选择 box 彻底脱离边界。
     std::vector<int> closesSelected(n, 0);
     std::vector<int> score(n, 0);
-    // 按 (score, BoxId) 排序；同分时稳定地选择较小 BoxId。
-    std::set<std::pair<int, BoxId>> candidates;
+    int maxDegree = 0;
     std::vector<int> order;
     order.reserve(n);
-    for (int i = 0; i < n; ++i)
+    for (int i = 0; i < n; ++i) {
         unselectedNeighbors[i] = static_cast<int>(graph.neighbors[i].size());
+        maxDegree = std::max(maxDegree, unselectedNeighbors[i]);
+        for (BoxId neighbor : graph.neighbors[i])
+            unselectedNeighborXor[i] ^= neighbor;
+    }
+    // score 在 [-maxDegree, 1] 中；扫雷 box 图的 maxDegree 不超过 56，故全部
+    // 映射进 BitFlagSet 的 64 个 bucket。BitFlagSet 的成员就是未选择的前沿 box。
+    BitFlagSet candidates;
+    candidates.reset(n);
 
     // 每轮都直接展开一个已选点周围的局部变化。这里没有“上下游”：只有
     // 已选择与未选择。一个已选择 box 只有在不存在未选择邻居时才离开边界。
     BoxId box = init;
     while (true) {
-        if (candidate[box])
-            candidates.erase({score[box], box});
         selected[box] = 1;
-        candidate[box] = 0;
         order.push_back(box);
 
         for (BoxId neighbor : graph.neighbors[box]) {
             // box 刚从未选择变为已选择；每个邻居都少了一个未选择邻居。
             --unselectedNeighbors[neighbor];
+            unselectedNeighborXor[neighbor] ^= box;
             if (selected[neighbor]) {
                 // neighbor 从“还连两个未选择点”变为“只连一个未选择点”。
-                // 找到这个唯一的未选择点 last；选择 last 时便能关闭 neighbor。
+                // 未选择邻居的异或值此时就是唯一的 last。
                 if (unselectedNeighbors[neighbor] == 1) {
-                    BoxId last = static_cast<BoxId>(-1);
-                    for (BoxId next : graph.neighbors[neighbor])
-                        if (!selected[next]) {
-                            last = next;
-                            break;
-                        }
-                    candidates.erase({score[last], last});
+                    const BoxId last = unselectedNeighborXor[neighbor];
+                    candidates.erase(last);
                     ++closesSelected[last];
                     score[last] = (unselectedNeighbors[last] != 0) - closesSelected[last];
-                    candidates.emplace(score[last], last);
+                    candidates.insert(last, score[last] + maxDegree);
                 }
             } else {
                 // neighbor 仍未选择；它现在已连接已选择部分，成为候选。
-                if (candidate[neighbor])
-                    candidates.erase({score[neighbor], neighbor});
-                candidate[neighbor] = 1;
+                if (candidates.contains(neighbor)) candidates.erase(neighbor);
                 score[neighbor] = (unselectedNeighbors[neighbor] != 0) - closesSelected[neighbor];
-                candidates.emplace(score[neighbor], neighbor);
+                candidates.insert(neighbor, score[neighbor] + maxDegree);
             }
         }
 
         // box 自己刚变为已选择。若它只剩一个未选择邻居，那个点日后会关闭 box。
         if (unselectedNeighbors[box] == 1) {
-            BoxId last = static_cast<BoxId>(-1);
-            for (BoxId next : graph.neighbors[box])
-                if (!selected[next]) {
-                    last = next;
-                    break;
-                }
-            candidates.erase({score[last], last});
+            const BoxId last = unselectedNeighborXor[box];
+            candidates.erase(last);
             ++closesSelected[last];
             score[last] = (unselectedNeighbors[last] != 0) - closesSelected[last];
-            candidates.emplace(score[last], last);
+            candidates.insert(last, score[last] + maxDegree);
         }
         if (static_cast<int>(order.size()) == n) break;
-        box = candidates.begin()->second;
+        box = candidates.popFirst();
     }
     return order;
 }

@@ -34,6 +34,9 @@
     <Filter Include="头文件\analysis\distribution">
       <UniqueIdentifier>{44635143-09b8-468b-8d86-412ccb8d9002}</UniqueIdentifier>
     </Filter>
+    <Filter Include="头文件\test\distribution">
+      <UniqueIdentifier>{D4A498C6-8CA3-4B68-84DA-B3B1544D8B77}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\core\types.h">
@@ -46,6 +49,9 @@
       <Filter>头文件\core</Filter>
     </ClInclude>
     <ClInclude Include="src\core\utility\flat_hashtable.h">
+      <Filter>头文件\core\utility</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\utility\bit_flag_set.h">
       <Filter>头文件\core\utility</Filter>
     </ClInclude>
     <ClInclude Include="src\core\utility\rng.h">
@@ -86,6 +92,9 @@
     </ClInclude>
     <ClInclude Include="src\analysis\distribution\distribution.h">
       <Filter>头文件\analysis\distribution</Filter>
+    </ClInclude>
+    <ClInclude Include="src\test\distribution\greedy_order.h">
+      <Filter>头文件\test\distribution</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

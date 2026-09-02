@@ -151,6 +151,7 @@
     <ClInclude Include="src\analysis\bruteforce\endgame_bruteforce.h" />
     <ClInclude Include="src\analysis\distribution\distribution.h" />
     <ClInclude Include="src\analysis\distribution\distribution_graph.h" />
+    <ClInclude Include="src\test\distribution\greedy_order.h" />
     <ClInclude Include="src\analysis\midgame\midgame_search.h" />
     <ClInclude Include="src\analysis\midgame\secondary_safety_evaluator.h" />
     <ClInclude Include="src\analysis\probability\exact.h" />
@@ -160,6 +161,7 @@
     <ClInclude Include="src\core\config.h" />
     <ClInclude Include="src\core\types.h" />
     <ClInclude Include="src\core\utility\flat_hashtable.h" />
+    <ClInclude Include="src\core\utility\bit_flag_set.h" />
     <ClInclude Include="src\core\utility\grid.h" />
     <ClInclude Include="src\core\utility\hash.h" />
     <ClInclude Include="src\core\utility\radix_sort.h" />
