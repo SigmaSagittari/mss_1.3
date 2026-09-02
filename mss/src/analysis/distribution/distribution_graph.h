@@ -15,6 +15,11 @@
 #include "core/utility/flat_hashtable.h"
 #include "core/utility/hash.h"
 
+// 性能分析：仅 TRACY_ENABLE（插桩配置）时引入 Tracy 区段；其他配置零开销。
+#if defined(TRACY_ENABLE)
+#include "tracy/Tracy.hpp"
+#endif
+
 namespace mss {
 
 // 测试专用访问口（友元）：实现定义于 test/distribution/greedy_order.h。
@@ -317,6 +322,9 @@ inline void DistributionSolver::dpHelper::Layer::DpState::updateHash() {
 inline DistributionSolver::dpHelper::Layer DistributionSolver::dpHelper::newBox(
     const Layer& before, BoxId v, int boxSize, const std::vector<BoxId>& closed,
     const std::vector<Check>& checks) const {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("dp.newBox");
+#endif
     Layer after;
     after.index.reserve(before.states.size() * static_cast<std::size_t>(boxSize + 1));
     after.states.reserve(before.states.size() * static_cast<std::size_t>(boxSize + 1));
@@ -327,41 +335,64 @@ inline DistributionSolver::dpHelper::Layer DistributionSolver::dpHelper::newBox(
 
         int minMine = 0;
         int maxMine = boxSize;
-        for (const Check& check : checks) {
-            int partial = 0;
-            for (BoxId member : check.constraint->boxIds)
-                partial += state.mines[member];
-            minMine = std::max(minMine, check.constraint->sum - partial - check.remAfter);
-            maxMine = std::min(maxMine, check.constraint->sum - partial);
+        {
+#if defined(TRACY_ENABLE)
+            ZoneScopedN("dp.checks");
+#endif
+            for (const Check& check : checks) {
+                int partial = 0;
+                for (BoxId member : check.constraint->boxIds)
+                    partial += state.mines[member];
+                minMine = std::max(minMine, check.constraint->sum - partial - check.remAfter);
+                maxMine = std::min(maxMine, check.constraint->sum - partial);
+            }
         }
 
         for (int mine = minMine; mine <= maxMine; ++mine) {
-            Layer::DpState next = state;
-            next.mineCount += mine;
-            next.mines[v] = static_cast<char>(mine);
-
-            const long double factor = DistributionSolver::binom(boxSize, mine);
+            // 独立于插桩块声明，供各段共享；段 zone 只包操作本身。
+            Layer::DpState next;
             Layer::DpValue nextValue;
-            nextValue.ways = value.ways * factor;
-            nextValue.mineCounts.resize(next.mines.size());
-            for (std::size_t b = 0; b < next.mines.size(); ++b)
-                nextValue.mineCounts[b] = value.mineCounts[b] * factor;
+            long double factor = 0;
+            {
+#if defined(TRACY_ENABLE)
+                ZoneScopedN("dp.copyScale");
+#endif
+                // 深拷贝整个 mines 向量 + mineCounts 全列乘 factor + 每转移一次分配。
+                next = state;
+                next.mineCount += mine;
+                next.mines[v] = static_cast<char>(mine);
 
-            for (BoxId box : closed) {
-                nextValue.mineCounts[box] += next.mines[box] * nextValue.ways;
-                next.mines[box] = 0;
+                factor = DistributionSolver::binom(boxSize, mine);
+                nextValue.ways = value.ways * factor;
+                nextValue.mineCounts.resize(next.mines.size());
+                for (std::size_t b = 0; b < next.mines.size(); ++b)
+                    nextValue.mineCounts[b] = value.mineCounts[b] * factor;
             }
-            next.updateHash();
-
-            if (const std::size_t* found = after.index.find(next.hash)) {
-                Layer::DpValue& merged = after.states[*found].value;
-                merged.ways += nextValue.ways;
-                for (std::size_t b = 0; b < merged.mineCounts.size(); ++b)
-                    merged.mineCounts[b] += nextValue.mineCounts[b];
-            } else {
-                const std::size_t id = after.states.size();
-                after.states.push_back({std::move(next), std::move(nextValue)});
-                after.index.emplace(after.states.back().state.hash, id);
+            {
+#if defined(TRACY_ENABLE)
+                ZoneScopedN("dp.closeHash");
+#endif
+                // 关闭列写入 + 清零，然后整条 mines 向量重散列。
+                for (BoxId box : closed) {
+                    nextValue.mineCounts[box] += next.mines[box] * nextValue.ways;
+                    next.mines[box] = 0;
+                }
+                next.updateHash();
+            }
+            {
+#if defined(TRACY_ENABLE)
+                ZoneScopedN("dp.merge");
+#endif
+                if (const std::size_t* found = after.index.find(next.hash)) {
+                    Layer::DpValue& merged = after.states[*found].value;
+                    merged.ways += nextValue.ways;
+                    for (std::size_t b = 0; b < merged.mineCounts.size(); ++b)
+                        merged.mineCounts[b] += nextValue.mineCounts[b];
+                } else {
+                    const std::size_t id = after.states.size();
+                    after.states.push_back({std::move(next), std::move(nextValue)});
+                    after.index.emplace(after.states.back().state.hash, id);
+                }
             }
         }
     }
@@ -371,6 +402,9 @@ inline DistributionSolver::dpHelper::Layer DistributionSolver::dpHelper::newBox(
 
 inline DistributionSolver::Distribution DistributionSolver::dpHelper::analysis(
     const std::vector<BoxId>& order, const Structure::Shape& shape) {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("graph.dp");
+#endif
     const int boxCount = static_cast<int>(shape.boxes.size());
     std::vector<int> position(boxCount);
     for (int step = 0; step < boxCount; ++step)
@@ -415,22 +449,27 @@ inline DistributionSolver::Distribution DistributionSolver::dpHelper::analysis(
                        checksByStep[step]);
     }
 
-    std::sort(layer.states.begin(), layer.states.end(),
-              [](const Layer::StateValue& lhs, const Layer::StateValue& rhs) {
-                  return lhs.state.mineCount < rhs.state.mineCount;
-              });
-
     Distribution result;
-    for (const Layer::StateValue& stateValue : layer.states) {
-        const Layer::DpState& state = stateValue.state;
-        const Layer::DpValue& value = stateValue.value;
-        Distribution::Entry entry;
-        entry.mineCount = state.mineCount;
-        entry.ways = value.ways;
-        entry.perBoxExpectation.resize(boxCount);
-        for (int box = 0; box < boxCount; ++box)
-            entry.perBoxExpectation[box] = value.mineCounts[box] / value.ways;
-        result.entries.push_back(std::move(entry));
+    {
+#if defined(TRACY_ENABLE)
+        ZoneScopedN("dp.finalize");
+#endif
+        std::sort(layer.states.begin(), layer.states.end(),
+                  [](const Layer::StateValue& lhs, const Layer::StateValue& rhs) {
+                      return lhs.state.mineCount < rhs.state.mineCount;
+                  });
+
+        for (const Layer::StateValue& stateValue : layer.states) {
+            const Layer::DpState& state = stateValue.state;
+            const Layer::DpValue& value = stateValue.value;
+            Distribution::Entry entry;
+            entry.mineCount = state.mineCount;
+            entry.ways = value.ways;
+            entry.perBoxExpectation.resize(boxCount);
+            for (int box = 0; box < boxCount; ++box)
+                entry.perBoxExpectation[box] = value.mineCounts[box] / value.ways;
+            result.entries.push_back(std::move(entry));
+        }
     }
     return result;
 }
@@ -696,38 +735,51 @@ inline std::vector<BoxId> DistributionSolver::Graph::polishWindow3(BoxId init) c
 
 template <DistributionSolver::PolishKind polish>
 inline const DistributionSolver::Distribution* DistributionSolver::analyze(const Structure::Shape& shape, DistributionSolver::DistPool& pool) {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("graph.analyze");
+#endif
     if (const Distribution* cached = pool.get(&shape)) return cached;
 
     Graph graph;
-    graph.neighbors.resize(shape.boxes.size());
-    static thread_local FlatHashTable<U128, char, U128Hash> edgeSet;
-    edgeSet.clear();
+    {
+#if defined(TRACY_ENABLE)
+        ZoneScopedN("graph.build");
+#endif
+        graph.neighbors.resize(shape.boxes.size());
+        static thread_local FlatHashTable<U128, char, U128Hash> edgeSet;
+        edgeSet.clear();
 
-    for (const Structure::Shape::Constraint& constraint : shape.constraints) {
-        for (std::size_t i = 0; i < constraint.boxIds.size(); ++i) {
-            const BoxId lhs = constraint.boxIds[i];
-            for (std::size_t j = i + 1; j < constraint.boxIds.size(); ++j) {
-                const BoxId rhs = constraint.boxIds[j];
-                const BoxId first = std::min(lhs, rhs);
-                const BoxId second = std::max(lhs, rhs);
-                const U128 edgeKey{static_cast<std::uint64_t>(first),
-                                   static_cast<std::uint64_t>(second)};
-                if (edgeSet.find(edgeKey)) continue;
-                edgeSet.emplace(edgeKey, 0);
-                graph.neighbors[lhs].push_back(rhs);
-                graph.neighbors[rhs].push_back(lhs);
+        for (const Structure::Shape::Constraint& constraint : shape.constraints) {
+            for (std::size_t i = 0; i < constraint.boxIds.size(); ++i) {
+                const BoxId lhs = constraint.boxIds[i];
+                for (std::size_t j = i + 1; j < constraint.boxIds.size(); ++j) {
+                    const BoxId rhs = constraint.boxIds[j];
+                    const BoxId first = std::min(lhs, rhs);
+                    const BoxId second = std::max(lhs, rhs);
+                    const U128 edgeKey{static_cast<std::uint64_t>(first),
+                                       static_cast<std::uint64_t>(second)};
+                    if (edgeSet.find(edgeKey)) continue;
+                    edgeSet.emplace(edgeKey, 0);
+                    graph.neighbors[lhs].push_back(rhs);
+                    graph.neighbors[rhs].push_back(lhs);
+                }
             }
         }
     }
 
     // 抛光默认自带 lexBfsOrder(diameterStart()) 产线；抛光方式由模板参数在
     // 编译期选定。
-    const BoxId init = graph.diameterStart();
     std::vector<BoxId> order;
-    if constexpr (polish == PolishKind::Adjacent) {
-        order = graph.polishAdjacent(init);
-    } else {
-        order = graph.polishWindow3(init);
+    {
+#if defined(TRACY_ENABLE)
+        ZoneScopedN("graph.order");
+#endif
+        const BoxId init = graph.diameterStart();
+        if constexpr (polish == PolishKind::Adjacent) {
+            order = graph.polishAdjacent(init);
+        } else {
+            order = graph.polishWindow3(init);
+        }
     }
 
     dpHelper helper;

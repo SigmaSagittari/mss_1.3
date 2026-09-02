@@ -6,6 +6,10 @@
 #include "test/performance/real_game_probability.h"
 #include "test/spread/probability.h"
 
+#if defined(TRACY_ENABLE)
+#include "tracy/TracyC.h"
+#endif
+
 int main() {
     using namespace mss;
     using namespace mss::test;
@@ -21,6 +25,7 @@ int main() {
     long long games = 0;
     long long components = 0;
     long long entries = 0;
+    long long mismatches = 0;  // old vs graph 分布表不一致的组件数
     double oldSeconds = 0.0;
     double graphSeconds = 0.0;
     struct ClassStats {
@@ -31,6 +36,9 @@ int main() {
     };
     std::vector<ClassStats> classes;
     while (std::chrono::steady_clock::now() < deadline) {
+#if defined(TRACY_ENABLE)
+        ZoneScopedN("harness.game");
+#endif
         ++games;
         Game game(normal_test);
         game.placeMines(rng, normal_test.firstMoveSafe);
@@ -43,7 +51,21 @@ int main() {
         DistributionSolver::DistPool graphPool;
 
         while (!game.won() && std::chrono::steady_clock::now() < deadline) {
+#if defined(TRACY_ENABLE)
+            ZoneScopedN("harness.position");
+#endif
             for (const Structure::Instance& instance : structure.components) {
+#if defined(TRACY_ENABLE)
+                // 小组件阈值：按 box 数分桶命名，便于在火焰图里对比 old vs graph。
+                // 注意必须用两条分支里的静态 zone（同一行的运行时名字会被
+                // 静态 source location 钉死成第一个求值结果）。
+                static constexpr std::size_t kSmallBoxes = 4;
+                if (instance.boxes.count() <= kSmallBoxes) {
+                    ZoneScopedN("component.small");
+                } else {
+                    ZoneScopedN("component.large");
+                }
+#endif
                 const auto oldStart = std::chrono::steady_clock::now();
                 const Distribution* old = Distribution::Solver::analyze(*instance.shape, oldPool);
                 const double oldElapsed = std::chrono::duration<double>(
@@ -56,6 +78,47 @@ int main() {
                 const double graphElapsed = std::chrono::duration<double>(
                     std::chrono::steady_clock::now() - graphStart).count();
                 graphSeconds += graphElapsed;
+
+                // 一致性校验：old 与 graph 的分布表逐条目比对，容忍 1e-10 相对误差
+                // （长双精度下算法改写的回归安全网；只统计，打日志限量防刷屏）。
+                {
+                    auto closeEnough = [](long double a, long double b) {
+                        const long double scale =
+                            std::max({1.0L, std::fabs(a), std::fabs(b)});
+                        return std::fabs(a - b) <= 1e-10L * scale;
+                    };
+                    bool ok = old->entries.size() == graph->entries.size();
+                    if (ok) {
+                        for (std::size_t i = 0; i < old->entries.size() && ok; ++i) {
+                            const auto& o = old->entries[i];
+                            const auto& g = graph->entries[i];
+                            if (o.mineCount != g.mineCount ||
+                                !closeEnough(o.ways, g.ways) ||
+                                o.perBoxExpectation.size() != g.perBoxExpectation.size()) {
+                                ok = false;
+                                break;
+                            }
+                            for (std::size_t b = 0; b < o.perBoxExpectation.size(); ++b)
+                                if (!closeEnough(o.perBoxExpectation[b],
+                                                 g.perBoxExpectation[b])) {
+                                    ok = false;
+                                    break;
+                                }
+                        }
+                    }
+                    if (!ok) {
+                        ++mismatches;
+                        if (mismatches <= 5) {
+                            std::cerr << "[MISMATCH] component boxes="
+                                      << instance.boxes.count()
+                                      << " constraints="
+                                      << instance.shape->constraints.size()
+                                      << " oldEntries=" << old->entries.size()
+                                      << " graphEntries=" << graph->entries.size()
+                                      << " oldNodes=" << old->searchNodes << '\n';
+                        }
+                    }
+                }
 
                 int nodeClass = 0;
                 for (std::uint64_t nodes = old->searchNodes; nodes >= 2; nodes >>= 1)
@@ -95,7 +158,7 @@ int main() {
     std::cout << "performance/distribution-real-game: " << positions << " positions from "
               << games << " games, " << components << " components, " << seconds << "s\n"
               << "  old=" << oldSeconds << "s, graph=" << graphSeconds << "s, entries="
-              << entries << '\n';
+              << entries << ", mismatches=" << mismatches << '\n';
     for (int nodeClass = 0; nodeClass < static_cast<int>(classes.size()); ++nodeClass) {
         const ClassStats& stats = classes[nodeClass];
         if (stats.components == 0) continue;

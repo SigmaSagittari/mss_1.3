@@ -13,6 +13,11 @@
 #include "core/utility/flat_hashtable.h"
 #include "core/utility/hash.h"
 
+// 性能分析：仅 TRACY_ENABLE（插桩配置）时引入 Tracy 区段；其他配置零开销。
+#if defined(TRACY_ENABLE)
+#include "tracy/Tracy.hpp"
+#endif
+
 namespace mss {
 
 // ─────────────────────────────────────────────────────────────
@@ -203,6 +208,9 @@ inline void Distribution::Solver::forEachAssignment(const Structure::Shape& shap
 
 inline const Distribution* Distribution::Solver::analyze(const Structure::Shape& shape,
                                                          DistPool& pool) {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("old.analyze");
+#endif
     if (const Distribution* cached = pool.get(&shape)) return cached;
 
     const int n = static_cast<int>(shape.boxes.size());
