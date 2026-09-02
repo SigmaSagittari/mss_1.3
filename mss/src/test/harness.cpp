@@ -6,10 +6,6 @@
 #include "test/performance/real_game_probability.h"
 #include "test/spread/probability.h"
 
-#if defined(TRACY_ENABLE)
-#include "tracy/TracyC.h"
-#endif
-
 int main() {
     using namespace mss;
     using namespace mss::test;
@@ -36,9 +32,6 @@ int main() {
     };
     std::vector<ClassStats> classes;
     while (std::chrono::steady_clock::now() < deadline) {
-#if defined(TRACY_ENABLE)
-        ZoneScopedN("harness.game");
-#endif
         ++games;
         Game game(normal_test);
         game.placeMines(rng, normal_test.firstMoveSafe);
@@ -51,21 +44,7 @@ int main() {
         DistributionSolver::DistPool graphPool;
 
         while (!game.won() && std::chrono::steady_clock::now() < deadline) {
-#if defined(TRACY_ENABLE)
-            ZoneScopedN("harness.position");
-#endif
             for (const Structure::Instance& instance : structure.components) {
-#if defined(TRACY_ENABLE)
-                // 小组件阈值：按 box 数分桶命名，便于在火焰图里对比 old vs graph。
-                // 注意必须用两条分支里的静态 zone（同一行的运行时名字会被
-                // 静态 source location 钉死成第一个求值结果）。
-                static constexpr std::size_t kSmallBoxes = 4;
-                if (instance.boxes.count() <= kSmallBoxes) {
-                    ZoneScopedN("component.small");
-                } else {
-                    ZoneScopedN("component.large");
-                }
-#endif
                 const auto oldStart = std::chrono::steady_clock::now();
                 const Distribution* old = Distribution::Solver::analyze(*instance.shape, oldPool);
                 const double oldElapsed = std::chrono::duration<double>(

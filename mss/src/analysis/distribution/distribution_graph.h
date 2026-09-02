@@ -15,11 +15,6 @@
 #include "core/utility/flat_hashtable.h"
 #include "core/utility/hash.h"
 
-// 性能分析：仅 TRACY_ENABLE（插桩配置）时引入 Tracy 区段；其他配置零开销。
-#if defined(TRACY_ENABLE)
-#include "tracy/Tracy.hpp"
-#endif
-
 namespace mss {
 
 // 测试专用访问口（友元）：实现定义于 test/distribution/greedy_order.h。
@@ -162,23 +157,24 @@ private:
         std::vector<BoxId> polishWindow3(std::vector<BoxId> order) const;
     };
 
-    // ── 前沿 DP：定长槽位，槽 = boxId ──
+    // ── 前沿 DP：状态压缩到"前沿"，SoA 平铺 ──
     //
     // 干什么：求一个组件的分布表 Z[t] / M[b][t]，替代暴力枚举。逐层沿
     // order 展开，每层维护一张状态表，一个状态 = 一个可合并的部分历史，
     // 值 = 该历史累计到当前的摆法权重。把"枚举全部 x 组合"换成"逐层
     // 枚举 + 状态合并"，复杂度由同层状态数（前沿宽度）主导。
     //
-    // 状态长什么样：mines 定长 = box 数量，下标就是 boxId，无任何映射。
-    // 每个槽的取值只有两类语义：
-    //   0     = 未赋值，或已赋值但已关闭（不再被任何约束读取）；
-    //   非 0  = 已赋值且仍在前沿，值就是雷数 x。
-    // 约束检查对成员槽直接求和，未赋值/已关闭都贡献 0，不需要"已赋值
-    // 子集"这类翻译。
+    // 状态表示（F1 重写后的核心）：
+    //   只有"仍被未来约束读取"的 box 值有意义 —— 关闭/未赋值的 box 槽
+    //   恒为 0。因此状态压成 packed[|F|]：只存当前层未关闭 box 的雷数。
+    //   boxId ↔ 槽位 的映射**不存进状态**：open 集每层都相同（是形状的
+    //   静态性质，由 order 的 position 与 closeStep 唯一确定），由
+    //   analysis 逐层流式构建的 layout/slotOf/gather 表提供；转移只是一
+    //   次按 gather 表的逐槽拷贝（幸存者继承旧槽，v 恒追加在末尾）。
     //
-    // 合并判据：mineCount（累计雷数 t）+ mines 整体相等。完整判据本可以
-    // 只比较"各活跃约束的部分和"（未来只读它）；用整体相等是更保守的
-    // 充分条件，状态数可能偏多，但实现最简单，先保正确。
+    //   合并判据 = mineCount（累计雷数 t）+ packed 整体相等。关闭/未赋值
+    //   槽恒为 0 且每层所有状态相同，不参与区分 —— 与旧实现"全向量相等"
+    //   完全等价的判据，只是不再反复搬 n 个槽。
     //
     // 封口与关闭都是静态的，由 order 位置推出：
     //   封口：约束 c 的成员在 order 中的最晚位置 lastPos，层 k == lastPos
@@ -186,47 +182,33 @@ private:
     //   关闭：box b 的关闭层 closeStep = b 所有约束 lastPos 的最大值，
     //         因为 b 需要保留 ⟺ 它还有约束未封口。
     //
-    // M 通道：mineCounts 定长 = box 数量，列下标即 boxId（不需要关闭
-    // 顺序）。列 = Σ(ways × x)：box 关闭那一层写入 x × 分支权重，之后
-    // 随分支缩放，末层 ÷ ways 得 perBoxExpectation。
+    // M 通道：columns[state][box]，列 = Σ(ways × x)：box 关闭那一层写入
+    // x × 分支权重，之后随分支缩放（未关闭列恒 0，缩放/合并循环只走
+    // "已关闭"列，closedSoFar 静态维护），末层 ÷ ways 得 perBoxExpectation。
+    //
+    // 平铺与复用：一层用 SoA（ways/columns/mineCounts/packed + 哈希索引），
+    // 无逐状态 vector/堆分配；两层缓冲 thread_local 交替复用跨调用容量。
     class dpHelper {
     public:
         // 入口：返回单组件分布表（契约同旧 Solver::analyze，entries 按
-        // mineCount 升序）。步骤：静态准备 → 首层表 → 逐层 newBox →
+        // mineCount 升序）。步骤：静态准备 → 首层表 → 逐层 transition →
         // 末层物化。不需要 graph：closed 与 remAfter 都由 shape + order
         // 静态推出，图只活在 order 产线里。
         Distribution analysis(const std::vector<BoxId>& order,
                               const Structure::Shape& shape);
 
     private:
-        // 一层的状态表。
+        // 一层的状态表（SoA 平铺）。同层所有状态共享同一 layout（静态）。
         struct Layer {
-            // 状态 = 一个可合并的部分历史，见类注释。
-            struct DpState {
-                int mineCount = 0;        // 已赋值 box 的雷数总和，末层即 t
-                std::vector<char> mines;  // 定长 n，槽 = boxId
-                U128 hash = {};
-
-                void updateHash();
-            };
-
-            // ways：该状态累计的摆法权重（已赋值 box 的组合数乘积）。
-            // mineCounts[b]：定长 n，列 = boxId，box b 的 Σ(ways × x)，
-            // 关闭层写入，末层 ÷ ways 即 perBoxExpectation。
-            struct DpValue {
-                long double ways = 0;
-                std::vector<long double> mineCounts;
-            };
-
-            struct StateValue {
-                DpState state;
-                DpValue value;
-            };
-
-            // FlatHashTable 只提供查找/插入，不提供遍历。状态与统计量连续保存，
-            // hash → 下标只作合并索引，避免哈希表 rehash 深拷贝 DpValue。
+            std::vector<long double> ways;     // [state]
+            std::vector<long double> columns;  // [state * boxCount + box]
+            std::vector<int> mineCounts;       // [state]
+            std::vector<char> packed;          // [state * frontier + slot]
             FlatHashTable<U128, std::size_t, U128Hash> index;
-            std::vector<StateValue> states;
+            int boxCount = 0;  // columns 行宽（= 组件 box 数）
+            int frontier = 0;  // packed 行宽（= 当前层 open box 数）
+
+            std::size_t count() const { return ways.size(); }
         };
 
         // 内层检查一个约束所需的全部数据（外层逐层构造）。
@@ -244,15 +226,25 @@ private:
             int remAfter = 0;  // 处理后剩余成员的 size 和，0 = 封口
         };
 
-        // 单层转移：before（层 k 表）→ 新表（层 k+1）。
-        // 对每条状态：按 checks 收窄 k 的可行区间（封口定值后不提前
-        // 退出，要过完 v 的全部约束再统一判区间），枚举可行 k；
-        // 新状态 = 旧 mines 拷贝 + v 槽写 k + closed 槽清零；
-        // 新值 = 旧列 × C + 本层关闭列写入（x × 分支权重）+ ways × C；
-        // 同键合并。
-        Layer newBox(const Layer& before, BoxId v, int boxSize,
-                     const std::vector<BoxId>& closed,
-                     const std::vector<Check>& checks) const;
+        // 单步转移的静态上下文（analysis 逐层构造，用完即弃）。
+        struct Transition {
+            BoxId v = 0;                             // 本步赋值的 box
+            int boxSize = 0;
+            const std::vector<BoxId>* closed = nullptr;  // 本步关闭的 box
+            const std::vector<Check>* checks = nullptr;  // 本步检查的约束
+            const std::vector<int>* slotOf = nullptr;    // box → 旧层槽位（-1 = 不在）
+            const std::vector<int>* gather = nullptr;    // 新槽 d → 旧槽（-1 = v 新增）
+            int newFrontier = 0;                         // 新层 open box 数
+        };
+
+        // 单层转移：before（层 k 表）→ after（层 k+1 表，写进线程局部
+        // 池复用）。对每条状态：按 checks 收窄 k 的可行区间（封口定值后
+        // 不提前退出，要过完 v 的全部约束再统一判区间），枚举可行 k；
+        // 新状态 = 按 gather 拷贝旧 packed + v 槽写 k；
+        // 新值 = 已关闭列 × C + 本层关闭列写入（x × 分支权重）+ ways × C；
+        // 同键合并。closedSoFar = 本层之前已关闭的 box（列非零）。
+        void transition(const Layer& before, Layer& after, const Transition& tr,
+                        const std::vector<BoxId>& closedSoFar) const;
     };
 
     // 测试访问口：定义于 test/distribution/greedy_order.h。Graph 整体私有，
@@ -311,165 +303,249 @@ inline long double DistributionSolver::binom(int n, int k) {
     return kComb[n][k];
 }
 
-inline void DistributionSolver::dpHelper::Layer::DpState::updateHash() {
-    U128Hasher hasher;
-    hasher.mix(mineCount);
-    for (char mine : mines)
-        hasher.mix(static_cast<std::uint64_t>(static_cast<unsigned char>(mine)));
-    hash = hasher.finalize();
-}
+inline void DistributionSolver::dpHelper::transition(
+    const Layer& before, Layer& after, const Transition& tr,
+    const std::vector<BoxId>& closedSoFar) const {
+    // 复用 after 的容量（清除不释放）：层间与跨 analyze 调用都避免重分配。
+    after.ways.clear();
+    after.mineCounts.clear();
+    after.packed.clear();
+    after.columns.clear();
+    after.index.clear();
+    after.boxCount = before.boxCount;
+    after.frontier = tr.newFrontier;
 
-inline DistributionSolver::dpHelper::Layer DistributionSolver::dpHelper::newBox(
-    const Layer& before, BoxId v, int boxSize, const std::vector<BoxId>& closed,
-    const std::vector<Check>& checks) const {
-#if defined(TRACY_ENABLE)
-    ZoneScopedN("dp.newBox");
-#endif
-    Layer after;
-    after.index.reserve(before.states.size() * static_cast<std::size_t>(boxSize + 1));
-    after.states.reserve(before.states.size() * static_cast<std::size_t>(boxSize + 1));
+    const int boxCount = after.boxCount;
+    const int oldFrontier = before.frontier;
+    const int newFrontier = after.frontier;
 
-    for (const Layer::StateValue& current : before.states) {
-        const Layer::DpState& state = current.state;
-        const Layer::DpValue& value = current.value;
+    const std::size_t estimate =
+        before.count() * static_cast<std::size_t>(tr.boxSize + 1);
+    after.ways.reserve(estimate);
+    after.mineCounts.reserve(estimate);
+    after.packed.reserve(estimate * static_cast<std::size_t>(newFrontier));
+    after.columns.reserve(estimate * static_cast<std::size_t>(boxCount));
+    after.index.reserve(estimate);
 
+    // 每转移的临时行：线程局部复用（只增长不释放），避免逐状态堆分配。
+    static thread_local std::vector<char> packedRow;
+    static thread_local std::vector<long double> colRow;
+    if (packedRow.size() < static_cast<std::size_t>(newFrontier))
+        packedRow.resize(static_cast<std::size_t>(newFrontier));
+    if (colRow.size() < static_cast<std::size_t>(boxCount))
+        colRow.resize(static_cast<std::size_t>(boxCount));
+
+    const std::vector<BoxId>& closed = *tr.closed;
+    const std::vector<Check>& checks = *tr.checks;
+    const std::vector<int>& slotOf = *tr.slotOf;
+    const std::vector<int>& gather = *tr.gather;
+
+    for (std::size_t s = 0; s < before.count(); ++s) {
+        const long double ways = before.ways[s];
+        const int t = before.mineCounts[s];
+        const char* packedSrc =
+            before.packed.data() + s * static_cast<std::size_t>(oldFrontier);
+        const long double* colSrc =
+            before.columns.data() + s * static_cast<std::size_t>(boxCount);
+
+        // 按 checks 收窄 k 的可行区间（封口定值后不提前退出，统一判）。
+        // 成员的槽在旧层 slotOf 里：未赋值/已关闭 = -1 → 贡献 0。
         int minMine = 0;
-        int maxMine = boxSize;
-        {
-#if defined(TRACY_ENABLE)
-            ZoneScopedN("dp.checks");
-#endif
-            for (const Check& check : checks) {
-                int partial = 0;
-                for (BoxId member : check.constraint->boxIds)
-                    partial += state.mines[member];
-                minMine = std::max(minMine, check.constraint->sum - partial - check.remAfter);
-                maxMine = std::min(maxMine, check.constraint->sum - partial);
+        int maxMine = tr.boxSize;
+        for (const Check& check : checks) {
+            int partial = 0;
+            for (BoxId member : check.constraint->boxIds) {
+                const int slot = slotOf[static_cast<std::size_t>(member)];
+                if (slot >= 0) partial += packedSrc[static_cast<std::size_t>(slot)];
             }
+            minMine = std::max(minMine, check.constraint->sum - partial - check.remAfter);
+            maxMine = std::min(maxMine, check.constraint->sum - partial);
         }
 
-        for (int mine = minMine; mine <= maxMine; ++mine) {
-            // 独立于插桩块声明，供各段共享；段 zone 只包操作本身。
-            Layer::DpState next;
-            Layer::DpValue nextValue;
-            long double factor = 0;
-            {
-#if defined(TRACY_ENABLE)
-                ZoneScopedN("dp.copyScale");
-#endif
-                // 深拷贝整个 mines 向量 + mineCounts 全列乘 factor + 每转移一次分配。
-                next = state;
-                next.mineCount += mine;
-                next.mines[v] = static_cast<char>(mine);
+        for (int k = minMine; k <= maxMine; ++k) {
+            const long double factor = DistributionSolver::binom(tr.boxSize, k);
+            const long double waysNext = ways * factor;
 
-                factor = DistributionSolver::binom(boxSize, mine);
-                nextValue.ways = value.ways * factor;
-                nextValue.mineCounts.resize(next.mines.size());
-                for (std::size_t b = 0; b < next.mines.size(); ++b)
-                    nextValue.mineCounts[b] = value.mineCounts[b] * factor;
+            // 新状态 packed：按 gather 拷旧槽，v 新槽写 k（gather = -1）。
+            for (int d = 0; d < newFrontier; ++d) {
+                const int src = gather[static_cast<std::size_t>(d)];
+                packedRow[static_cast<std::size_t>(d)] =
+                    src < 0 ? static_cast<char>(k)
+                            : packedSrc[static_cast<std::size_t>(src)];
             }
-            {
-#if defined(TRACY_ENABLE)
-                ZoneScopedN("dp.closeHash");
-#endif
-                // 关闭列写入 + 清零，然后整条 mines 向量重散列。
-                for (BoxId box : closed) {
-                    nextValue.mineCounts[box] += next.mines[box] * nextValue.ways;
-                    next.mines[box] = 0;
-                }
-                next.updateHash();
+
+            // 新列：清零 → 已关闭列 × factor → 本层关闭列写入 x × waysNext。
+            // （未赋值/未关闭列恒 0，缩放与合并只走非零列。）
+            std::fill(colRow.begin(), colRow.begin() + boxCount, 0.0L);
+            for (BoxId b : closedSoFar)
+                colRow[static_cast<std::size_t>(b)] =
+                    colSrc[static_cast<std::size_t>(b)] * factor;
+            for (BoxId b : closed) {
+                const long double xb =
+                    b == tr.v   // v 本层赋值即关闭（不在旧层，值 = k）
+                        ? static_cast<long double>(k)
+                        : static_cast<long double>(packedSrc[static_cast<std::size_t>(
+                              slotOf[static_cast<std::size_t>(b)])]);
+                colRow[static_cast<std::size_t>(b)] += xb * waysNext;
             }
-            {
-#if defined(TRACY_ENABLE)
-                ZoneScopedN("dp.merge");
-#endif
-                if (const std::size_t* found = after.index.find(next.hash)) {
-                    Layer::DpValue& merged = after.states[*found].value;
-                    merged.ways += nextValue.ways;
-                    for (std::size_t b = 0; b < merged.mineCounts.size(); ++b)
-                        merged.mineCounts[b] += nextValue.mineCounts[b];
-                } else {
-                    const std::size_t id = after.states.size();
-                    after.states.push_back({std::move(next), std::move(nextValue)});
-                    after.index.emplace(after.states.back().state.hash, id);
-                }
+
+            // 合并键 = mineCount + packed（关闭/未赋值槽不参与，等价旧全向量判据）。
+            U128Hasher hasher;
+            hasher.mix(t + k);
+            for (int d = 0; d < newFrontier; ++d)
+                hasher.mix(static_cast<std::uint64_t>(
+                    static_cast<unsigned char>(packedRow[static_cast<std::size_t>(d)])));
+            const U128 hash = hasher.finalize();
+
+            if (const std::size_t* found = after.index.find(hash)) {
+                const std::size_t target = *found;
+                after.ways[target] += waysNext;
+                long double* colTarget =
+                    after.columns.data() + target * static_cast<std::size_t>(boxCount);
+                for (BoxId b : closedSoFar)
+                    colTarget[static_cast<std::size_t>(b)] += colRow[static_cast<std::size_t>(b)];
+                for (BoxId b : closed)
+                    colTarget[static_cast<std::size_t>(b)] += colRow[static_cast<std::size_t>(b)];
+            } else {
+                const std::size_t id = after.count();
+                after.ways.push_back(waysNext);
+                after.mineCounts.push_back(t + k);
+                after.packed.insert(after.packed.end(), packedRow.begin(),
+                                    packedRow.begin() + newFrontier);
+                after.columns.insert(after.columns.end(), colRow.begin(),
+                                     colRow.begin() + boxCount);
+                after.index.emplace(hash, id);
             }
         }
     }
-
-    return after;
 }
 
 inline DistributionSolver::Distribution DistributionSolver::dpHelper::analysis(
     const std::vector<BoxId>& order, const Structure::Shape& shape) {
-#if defined(TRACY_ENABLE)
-    ZoneScopedN("graph.dp");
-#endif
     const int boxCount = static_cast<int>(shape.boxes.size());
     std::vector<int> position(boxCount);
     for (int step = 0; step < boxCount; ++step)
-        position[order[step]] = step;
+        position[order[static_cast<std::size_t>(step)]] = step;
 
     std::vector<int> closeStep = position;
     std::vector<std::vector<Check>> checksByStep(boxCount);
     for (const Structure::Shape::Constraint& constraint : shape.constraints) {
         int lastStep = -1;
         for (BoxId box : constraint.boxIds)
-            lastStep = std::max(lastStep, position[box]);
+            lastStep = std::max(lastStep, position[static_cast<std::size_t>(box)]);
         for (BoxId box : constraint.boxIds)
-            closeStep[box] = std::max(closeStep[box], lastStep);
+            closeStep[static_cast<std::size_t>(box)] =
+                std::max(closeStep[static_cast<std::size_t>(box)], lastStep);
 
         for (BoxId box : constraint.boxIds) {
             Check check;
             check.constraint = &constraint;
             for (BoxId member : constraint.boxIds)
-                if (position[member] > position[box])
-                    check.remAfter += shape.boxes[member].size;
-            checksByStep[position[box]].push_back(std::move(check));
+                if (position[static_cast<std::size_t>(member)] >
+                    position[static_cast<std::size_t>(box)])
+                    check.remAfter += shape.boxes[static_cast<std::size_t>(member)].size;
+            checksByStep[static_cast<std::size_t>(position[static_cast<std::size_t>(box)])]
+                .push_back(std::move(check));
         }
     }
 
     std::vector<std::vector<BoxId>> closedByStep(boxCount);
     for (BoxId box = 0; box < boxCount; ++box)
-        closedByStep[closeStep[box]].push_back(box);
+        closedByStep[static_cast<std::size_t>(closeStep[static_cast<std::size_t>(box)])]
+            .push_back(box);
 
-    Layer layer;
-    Layer::DpState initial;
-    initial.mines.assign(boxCount, 0);
-    initial.updateHash();
-    Layer::DpValue initialValue;
-    initialValue.ways = 1.0L;
-    initialValue.mineCounts.assign(boxCount, 0.0L);
-    layer.states.push_back({std::move(initial), std::move(initialValue)});
-    layer.index.emplace(layer.states.back().state.hash, 0);
+    // 流式布局：open 集（order-position 升序）+ box→槽位映射 + 转移 gather。
+    // 每层布局由"上一布局 - 本层关闭 + 追加 v"静态推出，DP 内无映射维护。
+    std::vector<BoxId> layout;
+    std::vector<int> slotOf(boxCount, -1);
+    std::vector<char> closeStamp(boxCount, 0);
+    std::vector<int> gather;
+    std::vector<BoxId> nextLayout;
+    std::vector<BoxId> closedSoFar;
+    layout.reserve(boxCount);
+    gather.reserve(boxCount);
+    nextLayout.reserve(boxCount);
+    closedSoFar.reserve(boxCount);
+
+    // 线程局部双层池：cur/next 交替，跨 analyze 调用复用容量。
+    static thread_local Layer tlCur;
+    static thread_local Layer tlNext;
+    Layer* cur = &tlCur;
+    Layer* next = &tlNext;
+
+    // 初始层：单状态（t=0，ways=1，packed 空，列全 0）。
+    cur->ways.assign(1, 1.0L);
+    cur->mineCounts.assign(1, 0);
+    cur->packed.clear();
+    cur->columns.assign(static_cast<std::size_t>(boxCount), 0.0L);
+    cur->boxCount = boxCount;
+    cur->frontier = 0;
+    cur->index.clear();
 
     for (int step = 0; step < boxCount; ++step) {
-        const BoxId box = order[step];
-        layer = newBox(layer, box, shape.boxes[box].size, closedByStep[step],
-                       checksByStep[step]);
+        const BoxId v = order[static_cast<std::size_t>(step)];
+
+        Transition tr;
+        tr.v = v;
+        tr.boxSize = shape.boxes[static_cast<std::size_t>(v)].size;
+        tr.closed = &closedByStep[static_cast<std::size_t>(step)];
+        tr.checks = &checksByStep[static_cast<std::size_t>(step)];
+        tr.slotOf = &slotOf;
+
+        // 本层关闭标记（stamp 免清零）→ 幸存者过滤；v 按 order-position
+        // 恒追加在末尾（closeStep[v] == step 时本层赋值即关闭，不追加）。
+        for (BoxId b : closedByStep[static_cast<std::size_t>(step)])
+            closeStamp[static_cast<std::size_t>(b)] = 1;
+        gather.clear();
+        nextLayout.clear();
+        for (std::size_t i = 0; i < layout.size(); ++i) {
+            const BoxId b = layout[i];
+            if (closeStamp[static_cast<std::size_t>(b)]) continue;
+            gather.push_back(static_cast<int>(i));
+            nextLayout.push_back(b);
+        }
+        if (closeStep[static_cast<std::size_t>(v)] > step) {
+            gather.push_back(-1);  // v 新槽
+            nextLayout.push_back(v);
+        }
+        tr.gather = &gather;
+        tr.newFrontier = static_cast<int>(nextLayout.size());
+
+        transition(*cur, *next, tr, closedSoFar);
+
+        std::swap(cur, next);
+        std::fill(slotOf.begin(), slotOf.end(), -1);
+        for (int d = 0; d < static_cast<int>(nextLayout.size()); ++d)
+            slotOf[static_cast<std::size_t>(nextLayout[static_cast<std::size_t>(d)])] = d;
+        layout.swap(nextLayout);
+        for (BoxId b : closedByStep[static_cast<std::size_t>(step)])
+            closeStamp[static_cast<std::size_t>(b)] = 0;
+        closedSoFar.insert(closedSoFar.end(),
+                           closedByStep[static_cast<std::size_t>(step)].begin(),
+                           closedByStep[static_cast<std::size_t>(step)].end());
     }
 
-    Distribution result;
-    {
-#if defined(TRACY_ENABLE)
-        ZoneScopedN("dp.finalize");
-#endif
-        std::sort(layer.states.begin(), layer.states.end(),
-                  [](const Layer::StateValue& lhs, const Layer::StateValue& rhs) {
-                      return lhs.state.mineCount < rhs.state.mineCount;
-                  });
+    // 末层物化：按 mineCount 升序出 entries（列 ÷ ways = perBoxExpectation）。
+    const std::size_t stateCount = cur->count();
+    std::vector<std::size_t> orderIdx(stateCount);
+    for (std::size_t i = 0; i < stateCount; ++i) orderIdx[i] = i;
+    std::sort(orderIdx.begin(), orderIdx.end(),
+              [&](std::size_t a, std::size_t b) {
+                  return cur->mineCounts[a] < cur->mineCounts[b];
+              });
 
-        for (const Layer::StateValue& stateValue : layer.states) {
-            const Layer::DpState& state = stateValue.state;
-            const Layer::DpValue& value = stateValue.value;
-            Distribution::Entry entry;
-            entry.mineCount = state.mineCount;
-            entry.ways = value.ways;
-            entry.perBoxExpectation.resize(boxCount);
-            for (int box = 0; box < boxCount; ++box)
-                entry.perBoxExpectation[box] = value.mineCounts[box] / value.ways;
-            result.entries.push_back(std::move(entry));
-        }
+    Distribution result;
+    for (std::size_t row : orderIdx) {
+        Distribution::Entry entry;
+        entry.mineCount = cur->mineCounts[row];
+        entry.ways = cur->ways[row];
+        entry.perBoxExpectation.resize(boxCount);
+        const long double* col =
+            cur->columns.data() + row * static_cast<std::size_t>(boxCount);
+        for (int box = 0; box < boxCount; ++box)
+            entry.perBoxExpectation[box] =
+                col[static_cast<std::size_t>(box)] / entry.ways;
+        result.entries.push_back(std::move(entry));
     }
     return result;
 }
@@ -735,19 +811,12 @@ inline std::vector<BoxId> DistributionSolver::Graph::polishWindow3(BoxId init) c
 
 template <DistributionSolver::PolishKind polish>
 inline const DistributionSolver::Distribution* DistributionSolver::analyze(const Structure::Shape& shape, DistributionSolver::DistPool& pool) {
-#if defined(TRACY_ENABLE)
-    ZoneScopedN("graph.analyze");
-#endif
     if (const Distribution* cached = pool.get(&shape)) return cached;
 
     Graph graph;
-    {
-#if defined(TRACY_ENABLE)
-        ZoneScopedN("graph.build");
-#endif
-        graph.neighbors.resize(shape.boxes.size());
-        static thread_local FlatHashTable<U128, char, U128Hash> edgeSet;
-        edgeSet.clear();
+    graph.neighbors.resize(shape.boxes.size());
+    static thread_local FlatHashTable<U128, char, U128Hash> edgeSet;
+    edgeSet.clear();
 
         for (const Structure::Shape::Constraint& constraint : shape.constraints) {
             for (std::size_t i = 0; i < constraint.boxIds.size(); ++i) {
@@ -765,21 +834,15 @@ inline const DistributionSolver::Distribution* DistributionSolver::analyze(const
                 }
             }
         }
-    }
 
     // 抛光默认自带 lexBfsOrder(diameterStart()) 产线；抛光方式由模板参数在
     // 编译期选定。
+    const BoxId init = graph.diameterStart();
     std::vector<BoxId> order;
-    {
-#if defined(TRACY_ENABLE)
-        ZoneScopedN("graph.order");
-#endif
-        const BoxId init = graph.diameterStart();
-        if constexpr (polish == PolishKind::Adjacent) {
-            order = graph.polishAdjacent(init);
-        } else {
-            order = graph.polishWindow3(init);
-        }
+    if constexpr (polish == PolishKind::Adjacent) {
+        order = graph.polishAdjacent(init);
+    } else {
+        order = graph.polishWindow3(init);
     }
 
     dpHelper helper;
