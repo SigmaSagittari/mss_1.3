@@ -104,8 +104,7 @@ struct DistributionSolver {
     // 分布池：shape.hash（内容指纹）→ const Distribution*，只增不删。
     // 键 = shape.hash（Structure::ShapePool::intern 时写入）：同内容必同分布，
     // 跨盘面 / 跨 ShapePool 命中合法。不能用 Shape* 指针做键：指针只在所属
-    // ShapePool 生命周期内稳定，跨盘面新建池时堆地址会被 malloc 复用，旧
-    // 指针误中旧分布（曾导致 Exact::analyze 的 boxProbs 反转污染）。
+    // ShapePool 生命周期内稳定，跨盘面新建池时堆地址会被 malloc 复用。
     struct DistPool {
         const Distribution* get(const Structure::Shape* shape);
         const Distribution* get(const Structure::Shape* shape) const;
@@ -117,30 +116,138 @@ struct DistributionSolver {
     };
 
     // ── 展开序 ──
-    // 展开恒用 lexBfsOrder（起点经 diameterStart 选取）；抛光方式由 analyze
-    // 的模板枚举在编译期选定，默认相邻抛光。抛光实现保持私有，测试经友元
-    // OrderProbe 组装两种抛光基准。
+    // 展开恒用私有 Graph 产线的 lexBfsOrder（起点经 diameterStart 选取）；
+    // 抛光方式由 analyze 的模板枚举在编译期选定，默认相邻抛光。产线锁在
+    // Graph 内部，测试经友元 OrderProbe 组装两种抛光基准。
     enum class PolishKind { Adjacent, Window3 };
 
     // 汇总分布表（forEachAssignment 聚合），经 DistPool 去重缓存。
     template <PolishKind polish = PolishKind::Adjacent>
     static const Distribution* analyze(const Structure::Shape& shape, DistPool& pool);
 
+private:
+    // ── 图 ──
+    // 仅按 Shape 的 BoxId 编号；纯内部实现细节，不对外暴露。展开序产线
+    // （直径端点、lexBFS、两种抛光）是图自己的子函数。Graph 整体归 solver
+    // 私有持有，父子一体，方法成员直接可见，无需友元。
     struct Graph {
-        // 仅按 Shape 的 BoxId 编号
+        // 仅按 Shape 的 BoxId 编号（测试探针要直接组装/校验，公开）。
         std::vector<std::vector<BoxId>> neighbors;
+
+        // 展开起点：从 box 0 出发的 DFS 最远端点（启发式；原"双扫"的第二段
+        // 端点无人使用，已删）。测试探针取 init 用，公开。
+        BoxId diameterStart() const;
+
+        // 对外只暴露两个成品入口：默认先用 lexBfsOrder(diameterStart())
+        // 取展开序再抛光。
+
+        // 相邻交换抛光成品（默认 2 轮）。
+        std::vector<BoxId> polishAdjacent(BoxId init) const;
+
+        // 3 窗口全排列抛光成品。
+        std::vector<BoxId> polishWindow3(BoxId init) const;
+
+    private:
+        // LexBFS 展开序（起点经 diameterStart 选取）：只被默认抛光入口
+        // 调用，不外露。
+        std::vector<BoxId> lexBfsOrder(BoxId init) const;
+
+        // 抛光核心（相邻交换 rounds 轮，默认 2 / 3 窗口全排列）：给定 order
+        // 就地抛光后返回。只被上面的默认入口调用，不外露。
+        std::vector<BoxId> polishAdjacent(std::vector<BoxId> order, int rounds = 2) const;
+        std::vector<BoxId> polishWindow3(std::vector<BoxId> order) const;
     };
 
-private:
-    // 展开起点：从 box 0 出发的 DFS 最远端点（启发式；原"双扫"的第二段
-    // 端点无人使用，已删）。
-    static BoxId diameterStart(const Graph& graph);
+    // ── 前沿 DP：定长槽位，槽 = boxId ──
+    //
+    // 干什么：求一个组件的分布表 Z[t] / M[b][t]，替代暴力枚举。逐层沿
+    // order 展开，每层维护一张状态表，一个状态 = 一个可合并的部分历史，
+    // 值 = 该历史累计到当前的摆法权重。把"枚举全部 x 组合"换成"逐层
+    // 枚举 + 状态合并"，复杂度由同层状态数（前沿宽度）主导。
+    //
+    // 状态长什么样：mines 定长 = box 数量，下标就是 boxId，无任何映射。
+    // 每个槽的取值只有两类语义：
+    //   0     = 未赋值，或已赋值但已关闭（不再被任何约束读取）；
+    //   非 0  = 已赋值且仍在前沿，值就是雷数 x。
+    // 约束检查对成员槽直接求和，未赋值/已关闭都贡献 0，不需要"已赋值
+    // 子集"这类翻译。
+    //
+    // 合并判据：mineCount（累计雷数 t）+ mines 整体相等。完整判据本可以
+    // 只比较"各活跃约束的部分和"（未来只读它）；用整体相等是更保守的
+    // 充分条件，状态数可能偏多，但实现最简单，先保正确。
+    //
+    // 封口与关闭都是静态的，由 order 位置推出：
+    //   封口：约束 c 的成员在 order 中的最晚位置 lastPos，层 k == lastPos
+    //         时 c 封口，唯一合法 k 被夹死（见 Check::remAfter）；
+    //   关闭：box b 的关闭层 closeStep = b 所有约束 lastPos 的最大值，
+    //         因为 b 需要保留 ⟺ 它还有约束未封口。
+    //
+    // M 通道：mineCounts 定长 = box 数量，列下标即 boxId（不需要关闭
+    // 顺序）。列 = Σ(ways × x)：box 关闭那一层写入 x × 分支权重，之后
+    // 随分支缩放，末层 ÷ ways 得 perBoxExpectation。
+    class dpHelper {
+    public:
+        // 入口：返回单组件分布表（契约同旧 Solver::analyze，entries 按
+        // mineCount 升序）。步骤：静态准备 → 首层表 → 逐层 newBox →
+        // 末层物化。不需要 graph：closed 与 remAfter 都由 shape + order
+        // 静态推出，图只活在 order 产线里。
+        Distribution analysis(const std::vector<BoxId>& order,
+                              const Structure::Shape& shape);
 
-    static std::vector<BoxId> lexBfsOrder(const Graph& graph, BoxId init);
-    static void polishAdjacent(const Graph& graph, std::vector<BoxId>& order, int rounds = 2);
-    static void polishWindow3(const Graph& graph, std::vector<BoxId>& order);
+    private:
+        // 一层的状态表。
+        struct Layer {
+            // 状态 = 一个可合并的部分历史，见类注释。
+            struct DpState {
+                int mineCount = 0;        // 已赋值 box 的雷数总和，末层即 t
+                std::vector<char> mines;  // 定长 n，槽 = boxId
 
-    // 测试访问口：定义于 test/distribution/greedy_order.h。
+                bool operator==(const DpState& other) const;
+                struct DpStateHash {
+                    std::size_t operator()(const DpState& s) const;
+                };
+            };
+
+            // ways：该状态累计的摆法权重（已赋值 box 的组合数乘积）。
+            // mineCounts[b]：定长 n，列 = boxId，box b 的 Σ(ways × x)，
+            // 关闭层写入，末层 ÷ ways 即 perBoxExpectation。
+            struct DpValue {
+                long double ways = 0;
+                std::vector<long double> mineCounts;
+            };
+
+            FlatHashTable<DpState, DpValue, DpState::DpStateHash> map;
+        };
+
+        // 内层检查一个约束所需的全部数据（外层逐层构造）。
+        // 设 s = 该约束已赋值成员的和 = Σ_{m∈members} 槽[m]（v 未赋值，
+        // 其槽为 0，故 members 给全体成员即可，无需区分已赋值子集）。
+        // 对候选 k（本步给 v 的雷数），要求同时满足：
+        //   s + k ≤ sum                   上界，超出即剪；
+        //   s + k + remAfter ≥ sum        下界，后面成员全摆满也不够即剪；
+        //   remAfter == 0 时上下界夹出唯一解 k = sum - s，即封口（v 是
+        //   本约束最后一个被赋值的成员），k 偏离即该历史非法。
+        // remAfter = 处理完 v 后本约束仍未赋值的成员 size 之和（不含
+        // v），由成员在 order 中的位置静态求出。
+        struct Check {
+            std::vector<BoxId> members;  // 该约束的全体成员 boxId
+            int sum = 0;                 // 约束目标雷数
+            int remAfter = 0;            // 处理后剩余成员的 size 和，0 = 封口
+        };
+
+        // 单层转移：before（层 k 表）→ 新表（层 k+1）。
+        // 对每条状态：按 checks 收窄 k 的可行区间（封口定值后不提前
+        // 退出，要过完 v 的全部约束再统一判区间），枚举可行 k；
+        // 新状态 = 旧 mines 拷贝 + v 槽写 k + closed 槽清零；
+        // 新值 = 旧列 × C + 本层关闭列写入（x × 分支权重）+ ways × C；
+        // 同键合并。
+        Layer newBox(const Layer& before, BoxId v, int boxSize,
+                     const std::vector<BoxId>& closed,
+                     const std::vector<Check>& checks) const;
+    };
+
+    // 测试访问口：定义于 test/distribution/greedy_order.h。Graph 整体私有，
+    // 探针经此友元才能命名并持有该类型。
     friend struct test::OrderProbe;
 
     // 组合数 C(n,k)：编译时查表。box 规模 ≤ 8（同一数字邻域集合的隐藏格
@@ -195,9 +302,9 @@ inline long double DistributionSolver::binom(int n, int k) {
     return kComb[n][k];
 }
 
-inline BoxId DistributionSolver::diameterStart(const Graph& graph) {
-    auto farthest = [&graph](BoxId start) {
-        std::vector<char> visited(graph.neighbors.size(), 0);
+inline BoxId DistributionSolver::Graph::diameterStart() const {
+    auto farthest = [this](BoxId start) {
+        std::vector<char> visited(neighbors.size(), 0);
         BoxId farthestNode = start;
         int farthestDistance = 0;
 
@@ -207,7 +314,7 @@ inline BoxId DistributionSolver::diameterStart(const Graph& graph) {
                 farthestDistance = distance;
                 farthestNode = node;
             }
-            for (const BoxId neighbor : graph.neighbors[node])
+            for (const BoxId neighbor : neighbors[node])
                 if (!visited[neighbor])
                     self(self, neighbor, distance + 1);
         };
@@ -219,8 +326,8 @@ inline BoxId DistributionSolver::diameterStart(const Graph& graph) {
     return farthest(0);
 }
 
-inline std::vector<BoxId> DistributionSolver::lexBfsOrder(const Graph& graph, BoxId init) {
-    const int n = static_cast<int>(graph.neighbors.size());
+inline std::vector<BoxId> DistributionSolver::Graph::lexBfsOrder(BoxId init) const {
+    const int n = static_cast<int>(neighbors.size());
 
     using VertexList = std::list<BoxId>;
 
@@ -269,7 +376,7 @@ inline std::vector<BoxId> DistributionSolver::lexBfsOrder(const Graph& graph, Bo
 
         std::vector<CellIt> touched;
 
-        for (const BoxId u : graph.neighbors[v]) {
+        for (const BoxId u : neighbors[v]) {
             if (colored[u]) continue;
 
             CellIt oldCell = cellOf[u];
@@ -299,8 +406,8 @@ inline std::vector<BoxId> DistributionSolver::lexBfsOrder(const Graph& graph, Bo
     return order;
 }
 
-inline void DistributionSolver::polishAdjacent(const Graph& graph, std::vector<BoxId>& order,
-                                                int rounds) {
+inline std::vector<BoxId> DistributionSolver::Graph::polishAdjacent(std::vector<BoxId> order,
+                                                                    int rounds) const {
     const int n = static_cast<int>(order.size());
 
     for (int round = 0; round < rounds; ++round) {
@@ -308,12 +415,12 @@ inline void DistributionSolver::polishAdjacent(const Graph& graph, std::vector<B
         std::vector<char> colored(n, false);
 
         for (BoxId v = 0; v < n; ++v)
-            rem[v] = static_cast<int>(graph.neighbors[v].size());
+            rem[v] = static_cast<int>(neighbors[v].size());
 
         auto delta = [&](BoxId v) {
             int closed = 0;
 
-            for (const BoxId u : graph.neighbors[v])
+            for (const BoxId u : neighbors[v])
                 if (colored[u] && rem[u] == 1) ++closed;
 
             return static_cast<int>(rem[v] != 0) - closed;
@@ -322,7 +429,7 @@ inline void DistributionSolver::polishAdjacent(const Graph& graph, std::vector<B
         auto color = [&](BoxId v) {
             colored[v] = true;
 
-            for (const BoxId u : graph.neighbors[v]) --rem[u];
+            for (const BoxId u : neighbors[v]) --rem[u];
         };
 
         for (int i = 0; i + 1 < n; ++i) {
@@ -330,7 +437,7 @@ inline void DistributionSolver::polishAdjacent(const Graph& graph, std::vector<B
             const BoxId b = order[i + 1];
 
             const bool bIsAvailableBeforeA =
-                static_cast<int>(graph.neighbors[b].size()) > rem[b];
+                static_cast<int>(neighbors[b].size()) > rem[b];
 
             if (bIsAvailableBeforeA && delta(b) < delta(a))
                 std::swap(order[i], order[i + 1]);
@@ -340,21 +447,26 @@ inline void DistributionSolver::polishAdjacent(const Graph& graph, std::vector<B
 
         color(order.back());
     }
+    return order;
 }
 
-inline void DistributionSolver::polishWindow3(const Graph& graph, std::vector<BoxId>& order) {
+inline std::vector<BoxId> DistributionSolver::Graph::polishAdjacent(BoxId init) const {
+    return polishAdjacent(lexBfsOrder(init));
+}
+
+inline std::vector<BoxId> DistributionSolver::Graph::polishWindow3(std::vector<BoxId> order) const {
     const int n = static_cast<int>(order.size());
 
     std::vector<int> rem(n);
     std::vector<char> colored(n, false);
 
     for (BoxId v = 0; v < n; ++v)
-        rem[v] = static_cast<int>(graph.neighbors[v].size());
+        rem[v] = static_cast<int>(neighbors[v].size());
 
     auto delta = [&](BoxId v) {
         int closed = 0;
 
-        for (const BoxId u : graph.neighbors[v])
+        for (const BoxId u : neighbors[v])
             if (colored[u] && rem[u] == 1) ++closed;
 
         return static_cast<int>(rem[v] != 0) - closed;
@@ -363,11 +475,11 @@ inline void DistributionSolver::polishWindow3(const Graph& graph, std::vector<Bo
     auto color = [&](BoxId v) {
         colored[v] = true;
 
-        for (const BoxId u : graph.neighbors[v]) --rem[u];
+        for (const BoxId u : neighbors[v]) --rem[u];
     };
 
     auto uncolor = [&](BoxId v) {
-        for (const BoxId u : graph.neighbors[v]) ++rem[u];
+        for (const BoxId u : neighbors[v]) ++rem[u];
 
         colored[v] = false;
     };
@@ -398,7 +510,7 @@ inline void DistributionSolver::polishWindow3(const Graph& graph, std::vector<Bo
             for (int j = 0; j < length; ++j) {
                 const BoxId v = candidate[j];
 
-                if (static_cast<int>(graph.neighbors[v].size()) == rem[v]) {
+                if (static_cast<int>(neighbors[v].size()) == rem[v]) {
                     valid = false;
                     break;
                 }
@@ -427,6 +539,11 @@ inline void DistributionSolver::polishWindow3(const Graph& graph, std::vector<Bo
             color(best[j]);
         }
     }
+    return order;
+}
+
+inline std::vector<BoxId> DistributionSolver::Graph::polishWindow3(BoxId init) const {
+    return polishWindow3(lexBfsOrder(init));
 }
 
 
@@ -455,13 +572,14 @@ inline const DistributionSolver::Distribution* DistributionSolver::analyze(const
         }
     }
 
-    // 展开恒用 lexBfsOrder；抛光方式由模板参数在编译期选定。
-    const BoxId init = diameterStart(graph);
-    std::vector<BoxId> order = lexBfsOrder(graph, init);
+    // 抛光默认自带 lexBfsOrder(diameterStart()) 产线；抛光方式由模板参数在
+    // 编译期选定。
+    const BoxId init = graph.diameterStart();
+    std::vector<BoxId> order;
     if constexpr (polish == PolishKind::Adjacent) {
-        polishAdjacent(graph, order);
+        order = graph.polishAdjacent(init);
     } else {
-        polishWindow3(graph, order);
+        order = graph.polishWindow3(init);
     }
 
     std::cout << "distribution/lex-bfs-order: boxes=" << shape.boxes.size()
