@@ -4,7 +4,6 @@
 #include <array>
 #include <climits>
 #include <iostream>
-#include <list>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -463,78 +462,91 @@ inline BoxId DistributionSolver::Graph::diameterStart() const {
 inline std::vector<BoxId> DistributionSolver::Graph::lexBfsOrder(BoxId init) const {
     const int n = static_cast<int>(neighbors.size());
 
-    using VertexList = std::list<BoxId>;
-
     struct Cell {
-        VertexList vertices;
-        int id = -1;
+        std::vector<BoxId> vertices;
+        int orderIndex = -1;
         int stamp = -1;
+        bool active = true;
     };
 
-    using Cells = std::list<Cell>;
-    using CellIt = Cells::iterator;
-    using VertexIt = VertexList::iterator;
-
-    Cells cells(1);
-    CellIt first = cells.begin();
-    first->id = 0;
-
-    std::vector<CellIt> cellOf(n);
-    std::vector<VertexIt> position(n);
-    std::vector<CellIt> splitCell(1, first);
+    std::vector<Cell> cells(1);
+    cells[0].vertices.reserve(n);
+    cells[0].orderIndex = 0;
+    std::vector<int> cellOrder(1, 0);
+    std::vector<int> cellOf(n, 0);
+    std::vector<int> position(n);
+    std::vector<int> splitCell(1, 0);
     std::vector<char> colored(n, false);
     std::vector<BoxId> order;
+    std::vector<int> touched;
     order.reserve(n);
+    touched.reserve(n);
 
     for (BoxId v = 0; v < n; ++v) {
-        first->vertices.push_back(v);
-        cellOf[v] = first;
-        position[v] = std::prev(first->vertices.end());
+        position[v] = static_cast<int>(cells[0].vertices.size());
+        cells[0].vertices.push_back(v);
     }
 
+    auto eraseVertex = [&](int cellId, BoxId v) {
+        std::vector<BoxId>& vertices = cells[cellId].vertices;
+        const int index = position[v];
+        const BoxId moved = vertices.back();
+        vertices[index] = moved;
+        position[moved] = index;
+        vertices.pop_back();
+    };
+
+    auto insertCellBefore = [&](int cellId) {
+        const int orderIndex = cells[cellId].orderIndex;
+        const int newCell = static_cast<int>(cells.size());
+        cells.push_back(Cell{});
+        splitCell.push_back(newCell);
+        cellOrder.insert(cellOrder.begin() + orderIndex, newCell);
+        for (int i = orderIndex; i < static_cast<int>(cellOrder.size()); ++i)
+            cells[cellOrder[i]].orderIndex = i;
+        return newCell;
+    };
+
+    int firstCell = 0;
     for (int step = 0; step < n; ++step) {
-        CellIt selectedCell;
+        while (!cells[cellOrder[firstCell]].active) ++firstCell;
+        const int selectedCell = cellOrder[firstCell];
         BoxId v;
 
         if (step == 0) {
             v = init;
-            selectedCell = cellOf[v];
         } else {
-            selectedCell = cells.begin();
-            v = selectedCell->vertices.front();
+            v = cells[selectedCell].vertices.front();
         }
 
-        selectedCell->vertices.erase(position[v]);
+        eraseVertex(selectedCell, v);
         colored[v] = true;
         order.push_back(v);
-
-        std::vector<CellIt> touched;
+        touched.clear();
 
         for (const BoxId u : neighbors[v]) {
             if (colored[u]) continue;
 
-            CellIt oldCell = cellOf[u];
+            const int oldCell = cellOf[u];
 
-            if (oldCell->stamp != step) {
-                CellIt newCell = cells.insert(oldCell, Cell{});
-                newCell->id = static_cast<int>(splitCell.size());
-                splitCell.push_back(newCell);
+            if (cells[oldCell].stamp != step) {
+                const int newCell = insertCellBefore(oldCell);
 
-                oldCell->stamp = step;
-                splitCell[oldCell->id] = newCell;
+                cells[oldCell].stamp = step;
+                splitCell[oldCell] = newCell;
                 touched.push_back(oldCell);
             }
 
-            CellIt newCell = splitCell[oldCell->id];
-            newCell->vertices.splice(newCell->vertices.end(), oldCell->vertices, position[u]);
+            const int newCell = splitCell[oldCell];
+            eraseVertex(oldCell, u);
+            position[u] = static_cast<int>(cells[newCell].vertices.size());
+            cells[newCell].vertices.push_back(u);
             cellOf[u] = newCell;
         }
 
-        if (selectedCell->stamp != step && selectedCell->vertices.empty())
-            cells.erase(selectedCell);
-
-        for (CellIt oldCell : touched)
-            if (oldCell->vertices.empty()) cells.erase(oldCell);
+        for (int oldCell : touched)
+            if (cells[oldCell].vertices.empty()) cells[oldCell].active = false;
+        if (cells[selectedCell].vertices.empty()) cells[selectedCell].active = false;
     }
 
     return order;
