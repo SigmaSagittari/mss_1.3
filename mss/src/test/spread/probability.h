@@ -8,7 +8,8 @@ inline void testProbabilitySpread(Rng& rng, const TestConfig& config) {
     TimeBox timebox(config.seconds);
     long long positions = 0;
     long long games = 0;
-    while (!timebox.expired() && counters().failures == 0) {
+    while ((config.games < 0 || games < config.games) &&
+           !timebox.expired() && counters().failures == 0) {
         ++games;
         generateGame(config, rng, [&](const Snapshot& s) {
             if (timebox.expired() || counters().failures != 0) return;

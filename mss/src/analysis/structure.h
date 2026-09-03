@@ -11,8 +11,11 @@
 #include "core/types.h"
 #include "core/utility/flat_hashtable.h"
 #include "core/utility/hash.h"
+#include "core/workspaces.h"
 
 namespace mss {
+// 本模块工作区（core/workspaces.h 集中存放，全程序每线程一份）。
+using scratch::structureWs;
 
 // ─────────────────────────────────────────────────────────────
 // structure.h — 盘面图论结构：把 Frontier/数字格组织成连通块，供分布层计数。
@@ -195,17 +198,15 @@ inline Structure::Result Structure::analyze(const ObservedBoard& state,
     result.cellLoc.assign((rows + 1) * (cols + 1),
                           CellLocation{});
 
-    // 线程局部复用缓冲区，避免反复分配。
-    thread_local Grid<char> vis;
-    thread_local Grid<U128> cellHash;
-    thread_local std::vector<std::pair<int, int>> cells;
-    if (vis.rows() != rows || vis.cols() != cols) {
-        vis.resize(rows, cols, 0);
-        cellHash.resize(rows, cols, U128{});
-        cells.reserve(rows * cols / 2);
+    // 工作区缓冲（core/workspaces.h，analyze 专用一套：下次调用 fill 清零）。
+    if (structureWs.analyzeVis.rows() != rows ||
+        structureWs.analyzeVis.cols() != cols) {
+        structureWs.analyzeVis.resize(rows, cols, 0);
+        structureWs.analyzeCellHash.resize(rows, cols, U128{});
+        structureWs.analyzeCells.reserve(rows * cols / 2);
     } else {
-        vis.fill(0);
-        cellHash.fill(U128{});
+        structureWs.analyzeVis.fill(0);
+        structureWs.analyzeCellHash.fill(U128{});
     }
 
     // 1. 给数字格周围的未开格累加哈希值：哈希相同 = 属于同一单位格。
@@ -217,17 +218,21 @@ inline Structure::Result Structure::analyze(const ObservedBoard& state,
                 const U128 seed{splitmix64(pos),
                                 splitmix64(pos + 0x9e3779b97f4a7c15ULL)};
                 forEachAdjacent(i, j, rows, cols, [&](int nx, int ny) {
-                    cellHash[nx][ny] += seed;
+                    structureWs.analyzeCellHash[nx][ny] += seed;
                 });
             }
 
     // 2. 从未访问的前沿格出发，收集所有连通块。
     for (int i = 1; i <= rows; ++i)
         for (int j = 1; j <= cols; ++j)
-            if (basic.marks[i][j] == Mark::Frontier && !vis[i][j]) {
-                cells.clear();
-                collectComponent(i, j, state, basic, vis, cells);
-                result.components.push_back(buildComponent(cells, state, basic, cellHash, pool));
+            if (basic.marks[i][j] == Mark::Frontier &&
+                !structureWs.analyzeVis[i][j]) {
+                structureWs.analyzeCells.clear();
+                collectComponent(i, j, state, basic, structureWs.analyzeVis,
+                                 structureWs.analyzeCells);
+                result.components.push_back(buildComponent(
+                    structureWs.analyzeCells, state, basic,
+                    structureWs.analyzeCellHash, pool));
             }
 
     // 3. 回填格子 → 位置映射。
@@ -286,17 +291,11 @@ inline Structure::Instance Structure::buildComponent(
     const int rows = state.rows;
     const int cols = state.cols;
 
-    // 线程局部复用工作区（无重入）：避免每块重建的临时向量分配。
-    static thread_local FlatHashTable<U128, BoxId, U128Hash> tlHashBox;
-    static thread_local std::vector<int> tlHashUsed;
-    static thread_local std::vector<BoxId> tlBoxOfCells;
-    static thread_local std::vector<std::vector<CellId>> tlBuckets;
-    static thread_local std::vector<char> tlBoxUsed;
-    static thread_local std::vector<BoxId> tlAllBoxIds;  // 邻盒 id 平铺收集桶
-    tlHashBox.clear();  // 保留容量，只清占位
+    // 复用工作区（core/workspaces.h，事务式：每轮 clear/assign）。
+    structureWs.hashBox.clear();  // 保留容量，只清占位
 
     // 1. 收集单位格：哈希相同 = 同一单位格（哈希表替代 sort+unique+lower_bound，O(C) 均摊）。
-    tlBoxOfCells.assign(cells.size(), static_cast<BoxId>(-1));
+    structureWs.boxOfCells.assign(cells.size(), static_cast<BoxId>(-1));
     Shape shape;
 
     for (std::size_t ci = 0; ci < cells.size(); ++ci) {
@@ -304,65 +303,65 @@ inline Structure::Instance Structure::buildComponent(
         if (basic.marks[x][y] != Mark::Frontier) continue;
         const U128 h = cellHash[x][y];
         BoxId boxId;
-        if (const BoxId* found = tlHashBox.find(h)) {
+        if (const BoxId* found = structureWs.hashBox.find(h)) {
             boxId = *found;
         } else {
             boxId = static_cast<BoxId>(shape.boxes.size());
             shape.boxes.push_back({0});
-            tlHashBox.emplace(h, boxId);
+            structureWs.hashBox.emplace(h, boxId);
         }
         shape.boxes[boxId].size++;
-        tlBoxOfCells[ci] = boxId;
+        structureWs.boxOfCells[ci] = boxId;
         // 复用 cellHash：改为保存 格子 → 单位格 id。
         cellHash[x][y] = U128{static_cast<std::uint64_t>(boxId), 0};
     }
 
     // 2. 按 box 顺序扁平收集格子（桶收集，O(C)，替代 box×cells 双循环）。
-    tlBuckets.assign(shape.boxes.size(), {});
+    structureWs.buckets.assign(shape.boxes.size(), {});
     for (std::size_t ci = 0; ci < cells.size(); ++ci) {
-        const BoxId b = tlBoxOfCells[ci];
+        const BoxId b = structureWs.boxOfCells[ci];
         if (b == static_cast<BoxId>(-1)) continue;  // 数字格无单位格归属
-        tlBuckets[b].push_back(
+        structureWs.buckets[b].push_back(
             state.id(cells[ci].first, cells[ci].second));
     }
     inst.boxes.boxOf.push_back(0);
-    for (std::size_t b = 0; b < tlBuckets.size(); ++b) {
-        inst.boxes.cells.insert(inst.boxes.cells.end(), tlBuckets[b].begin(),
-                                tlBuckets[b].end());
+    for (std::size_t b = 0; b < structureWs.buckets.size(); ++b) {
+        inst.boxes.cells.insert(inst.boxes.cells.end(), structureWs.buckets[b].begin(),
+                                structureWs.buckets[b].end());
         inst.boxes.boxOf.push_back(static_cast<std::uint16_t>(inst.boxes.cells.size()));
     }
 
-    // 3. 数字格 → 约束：邻盒集合单遍平铺收集进 thread_local 缓冲，同时记
+    // 3. 数字格 → 约束：邻盒集合单遍平铺收集进工作区缓冲，同时记
     //    sum/offset/count；块结束时整体拷贝进 shape 的平铺存储（一次 memcpy
-    //    级搬移，无逐约束小分配）。去重用 tlBoxUsed 与旧逻辑一致。
-    tlBoxUsed.assign(shape.boxes.size(), 0);
-    tlAllBoxIds.clear();
+    //    级搬移，无逐约束小分配）。去重用 boxUsed 与旧逻辑一致。
+    structureWs.boxUsed.assign(shape.boxes.size(), 0);
+    structureWs.allBoxIds.clear();
     for (const std::pair<int, int>& cell : cells) {
         const int x = cell.first;
         const int y = cell.second;
         if (!isNumber(state.board[x][y])) continue;
         int sum = numberValue(state.board[x][y]);
         const std::uint32_t start =
-            static_cast<std::uint32_t>(tlAllBoxIds.size());
+            static_cast<std::uint32_t>(structureWs.allBoxIds.size());
         forEachAdjacent(x, y, rows, cols, [&](int nx, int ny) {
             if (basic.marks[nx][ny] == Mark::Mine) --sum;
             if (basic.marks[nx][ny] == Mark::Frontier) {
                 const BoxId boxId = static_cast<BoxId>(cellHash[nx][ny].lo);
-                if (!tlBoxUsed[boxId]) {
-                    tlBoxUsed[boxId] = 1;
-                    tlAllBoxIds.push_back(boxId);
+                if (!structureWs.boxUsed[boxId]) {
+                    structureWs.boxUsed[boxId] = 1;
+                    structureWs.allBoxIds.push_back(boxId);
                 }
             }
         });
-        for (std::size_t k = start; k < tlAllBoxIds.size(); ++k)
-            tlBoxUsed[tlAllBoxIds[k]] = 0;
+        for (std::size_t k = start; k < structureWs.allBoxIds.size(); ++k)
+            structureWs.boxUsed[structureWs.allBoxIds[k]] = 0;
         shape.constraints_.push_back(Shape::Constraint{
             sum, start,
-            static_cast<std::uint8_t>(tlAllBoxIds.size() - start)});
+            static_cast<std::uint8_t>(structureWs.allBoxIds.size() - start)});
         inst.constraintCells.push_back(state.id(x, y));
     }
-    shape.boxIds_.insert(shape.boxIds_.end(), tlAllBoxIds.begin(),
-                         tlAllBoxIds.end());
+    shape.boxIds_.insert(shape.boxIds_.end(), structureWs.allBoxIds.begin(),
+                         structureWs.allBoxIds.end());
 
     // 4. intern 形状。
     inst.shape = pool.intern(std::move(shape));
@@ -392,30 +391,24 @@ inline Structure::Delta Structure::update(const ObservedBoard& state,
     const int rows = state.rows;
     const int cols = state.cols;
 
-    // 线程局部复用缓冲区：尺寸变化时 resize；否则由函数末尾手动清零。
-    static thread_local Grid<char> dirty;
-    static thread_local Grid<char> vis;
-    static thread_local Grid<U128> cellHash;
-    static thread_local std::vector<std::pair<int, int>> dirtyCells;
-    static thread_local std::vector<std::pair<int, int>> cells;
-    static thread_local std::vector<char> removedFlag;  // 与组件数组平行的临时删标
-    if (dirty.rows() != rows || dirty.cols() != cols) {
-        dirty.resize(rows, cols, 0);
-        vis.resize(rows, cols, 0);
-        cellHash.resize(rows, cols, U128{});
-        cells.reserve(rows * cols / 2);
+    // 工作区缓冲（core/workspaces.h，update 专用一套：函数内使用、收尾手动清）。
+    if (structureWs.dirty.rows() != rows || structureWs.dirty.cols() != cols) {
+        structureWs.dirty.resize(rows, cols, 0);
+        structureWs.updateVis.resize(rows, cols, 0);
+        structureWs.updateCellHash.resize(rows, cols, U128{});
+        structureWs.updateCells.reserve(rows * cols / 2);
     }
     // removedFlag 与组件数组平行，每次更新开头必须**整体**清零：
     // 只在数组增长时补零会残留上一轮的删标——把从未作废的活组件当垃圾删掉
     // （且 step2 的删标短路会跳过其合法作废），成员 cellLoc 残留脏归属。
     // assign(size, 0) 即全量清零。
-    removedFlag.assign(result.components.size(), 0);
+    structureWs.removedFlag.assign(result.components.size(), 0);
 
     // 标记某格为脏：去重，并记录位置到 dirtyCells。
     auto markDirty = [&](int x, int y) {
-        if (dirty[x][y]) return;
-        dirty[x][y] = 1;
-        dirtyCells.emplace_back(x, y);
+        if (structureWs.dirty[x][y]) return;
+        structureWs.dirty[x][y] = 1;
+        structureWs.dirtyCells.emplace_back(x, y);
     };
     // 摘除某格的结构归属。
     auto clearCellLoc = [&](int x, int y) {
@@ -425,7 +418,7 @@ inline Structure::Delta Structure::update(const ObservedBoard& state,
     // 单位）。删标放在 update 内部的临时 removedFlag，不进公共 Instance 类型，
     // 避免随 Delta::addedData 泄漏给重放/UI 消费方。
     auto invalidateComponent = [&](ComponentId cid) {
-        removedFlag[cid] = 1;
+        structureWs.removedFlag[cid] = 1;
         const Instance& inst = result.components[cid];
         for (std::size_t b = 0; b < inst.boxes.count(); ++b)
             for (std::size_t k = inst.boxes.boxOf[b]; k < inst.boxes.boxOf[b + 1]; ++k) {
@@ -458,11 +451,11 @@ inline Structure::Delta Structure::update(const ObservedBoard& state,
     //    作废会向 dirtyCells 追加成员，故用动态下标遍历（删标去重，成员归位已清）。
     {
         std::size_t i = 0;
-        while (i < dirtyCells.size()) {
-            const auto [x, y] = dirtyCells[i++];
+        while (i < structureWs.dirtyCells.size()) {
+            const auto [x, y] = structureWs.dirtyCells[i++];
             const CellLocation loc = result.cellLoc[state.id(x, y)];
             if (loc.component == -1) continue;
-            if (removedFlag[loc.component]) continue;  // 已作废
+            if (structureWs.removedFlag[loc.component]) continue;  // 已作废
             invalidateComponent(loc.component);
         }
     }
@@ -485,16 +478,20 @@ inline Structure::Delta Structure::update(const ObservedBoard& state,
     std::vector<Instance> staged;
     {
         std::size_t i = 0;
-        while (i < dirtyCells.size()) {
-            const auto [x, y] = dirtyCells[i++];
-            if (basic.marks[x][y] != Mark::Frontier || vis[x][y]) continue;
-            cells.clear();
-            collectComponent(x, y, state, basic, vis, cells);
+        while (i < structureWs.dirtyCells.size()) {
+            const auto [x, y] = structureWs.dirtyCells[i++];
+            if (basic.marks[x][y] != Mark::Frontier || structureWs.updateVis[x][y])
+                continue;
+            structureWs.updateCells.clear();
+            collectComponent(x, y, state, basic, structureWs.updateVis,
+                             structureWs.updateCells);
             // 无需"吞并"旧组件：step2 动态闭包已把事件波及的所有组件整块作废并
             // 清空其成员 cellLoc；纯揭示世界（assert next != Hidden）下，此处
             // DFS 访问的格子必然 loc.component == -1，重建归属不会重复。
-            for (const auto& [cx, cy] : cells) cellHash[cx][cy] = hashAt(cx, cy);
-            staged.push_back(buildComponent(cells, state, basic, cellHash, pool));
+            for (const auto& [cx, cy] : structureWs.updateCells)
+                structureWs.updateCellHash[cx][cy] = hashAt(cx, cy);
+            staged.push_back(buildComponent(structureWs.updateCells, state, basic,
+                                            structureWs.updateCellHash, pool));
         }
     }
 
@@ -507,7 +504,7 @@ inline Structure::Delta Structure::update(const ObservedBoard& state,
     {
         int i = static_cast<int>(result.components.size()) - 1;
         while (i >= 0) {
-            if (!removedFlag[i]) {
+            if (!structureWs.removedFlag[i]) {
                 --i;
                 continue;
             }
@@ -519,8 +516,8 @@ inline Structure::Delta Structure::update(const ObservedBoard& state,
             if (i != last) {
                 result.components[i] =
                     std::move(result.components[last]);
-                removedFlag[i] =
-                    removedFlag[last];
+                structureWs.removedFlag[i] =
+                    structureWs.removedFlag[last];
                 // 重映射被移动组件的 cellLoc（尾部恒为活组件，见上）。
                 const Instance& moved = result.components[i];
                 for (std::size_t b = 0; b < moved.boxes.count(); ++b)
@@ -554,24 +551,24 @@ inline Structure::Delta Structure::update(const ObservedBoard& state,
     // 5. 清零工作区。清理集 = dirtyCells（事件邻域 + 被作废成员）∪ 本轮新建
     //    组件实例的成员坐标——后者即本次 DFS 的全部访问集（frontier →
     //    boxes.cells，数字格 → constraintCells），无需另存任何集合。
-    for (const auto& [x, y] : dirtyCells) {
-        dirty[x][y] = 0;
-        vis[x][y] = 0;
-        cellHash[x][y] = U128{};
+    for (const auto& [x, y] : structureWs.dirtyCells) {
+        structureWs.dirty[x][y] = 0;
+        structureWs.updateVis[x][y] = 0;
+        structureWs.updateCellHash[x][y] = U128{};
     }
-    dirtyCells.clear();
+    structureWs.dirtyCells.clear();
     for (int c = appendStart; c < static_cast<int>(result.components.size()); ++c) {
         const Instance& inst = result.components[c];
         for (std::size_t b = 0; b < inst.boxes.count(); ++b)
             for (std::size_t k = inst.boxes.boxOf[b]; k < inst.boxes.boxOf[b + 1]; ++k) {
                 const auto [x, y] = state.pos(inst.boxes.cells[k]);
-                vis[x][y] = 0;
-                cellHash[x][y] = U128{};
+                structureWs.updateVis[x][y] = 0;
+                structureWs.updateCellHash[x][y] = U128{};
             }
         for (CellId cid : inst.constraintCells) {
             const auto [x, y] = state.pos(cid);
-            vis[x][y] = 0;
-            cellHash[x][y] = U128{};
+            structureWs.updateVis[x][y] = 0;
+            structureWs.updateCellHash[x][y] = U128{};
         }
     }
 

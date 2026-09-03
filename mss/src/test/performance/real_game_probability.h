@@ -15,7 +15,7 @@ inline void testRealGameProbabilityPerformance(Rng& rng, const TestConfig& confi
     long long positions = 0;
     long long games = 0;
     long long unavailableMoves = 0;
-    while (!timebox.expired()) {
+    while ((config.games < 0 || games < config.games) && !timebox.expired()) {
         ++games;
         generateGame(config, rng, [&](const Snapshot& snapshot) {
             if (timebox.expired()) return;

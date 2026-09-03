@@ -12,8 +12,11 @@
 #include "core/types.h"
 #include "core/utility/flat_hashtable.h"
 #include "core/utility/hash.h"
+#include "core/workspaces.h"
 
 namespace mss {
+// 本模块工作区（core/workspaces.h 集中存放，全程序每线程一份）。
+using scratch::distributionWs;
 
 // ─────────────────────────────────────────────────────────────
 // distribution.h — 连通块的计数与枚举。
@@ -137,28 +140,22 @@ inline void Distribution::Solver::forEachAssignment(const Structure::Shape& shap
     const int n = static_cast<int>(shape.boxes.size());
     const int nc = static_cast<int>(shape.constraintCount());
 
-    // 线程局部复用工作区（无重入）：避免每次分析的嵌套 vector 分配。
-    static thread_local std::vector<std::vector<int>> tlBoxLimits;
-    static thread_local std::vector<int> tlConsSum;
-    static thread_local std::vector<int> tlConsMaxAdd;
-    static thread_local std::vector<int> tlCurSum;
-    static thread_local std::vector<int> tlSizeSum;
-    static thread_local std::vector<char> tlAssignment;
-    tlBoxLimits.assign(n, {});
-    tlConsSum.assign(nc, 0);
-    tlConsMaxAdd.assign(nc, 0);
-    tlCurSum.assign(nc, 0);
-    tlSizeSum.assign(nc, 0);
-    tlAssignment.assign(n, 0);
+    // 复用工作区（core/workspaces.h，事务式：每次进入 assign 重置）。
+    distributionWs.boxLimits.assign(n, {});
+    distributionWs.consSum.assign(nc, 0);
+    distributionWs.consMaxAdd.assign(nc, 0);
+    distributionWs.curSum.assign(nc, 0);
+    distributionWs.sizeSum.assign(nc, 0);
+    distributionWs.assignment.assign(n, 0);
 
     for (int i = 0; i < nc; ++i) {
         const Structure::Shape::ConstraintView cv =
             shape.constraint(i);
-        tlConsSum[i] = cv.sum;
+        distributionWs.consSum[i] = cv.sum;
         for (BoxId boxId : cv.boxIds) {
-            tlConsMaxAdd[i] +=
+            distributionWs.consMaxAdd[i] +=
                 shape.boxes[boxId].size;
-            tlBoxLimits[boxId].push_back(i);
+            distributionWs.boxLimits[boxId].push_back(i);
         }
     }
 
@@ -169,33 +166,33 @@ inline void Distribution::Solver::forEachAssignment(const Structure::Shape& shap
     auto dfs = [&](auto&& self, int idx, long double curWays) -> void {
         if (searchNodes) ++*searchNodes;
         if (idx == n) {
-            onAssignment(tlAssignment, curWays);
+            onAssignment(distributionWs.assignment, curWays);
             return;
         }
         const int maxK = shape.boxes[idx].size;
         for (int k = 0; k <= maxK; ++k) {
-            tlAssignment[idx] = static_cast<char>(k);
+            distributionWs.assignment[idx] = static_cast<char>(k);
             bool ok = true;
-            for (int c : tlBoxLimits[idx]) {
-                const int s = tlCurSum[c] + k;
+            for (int c : distributionWs.boxLimits[idx]) {
+                const int s = distributionWs.curSum[c] + k;
                 // rem = 约束 c 未赋 box（含当前 idx）的 size 之和
-                const int rem = tlConsMaxAdd[c] -
-                                (tlSizeSum[c] + maxK);
-                if (s > tlConsSum[c] ||
-                    s + rem < tlConsSum[c]) {
+                const int rem = distributionWs.consMaxAdd[c] -
+                                (distributionWs.sizeSum[c] + maxK);
+                if (s > distributionWs.consSum[c] ||
+                    s + rem < distributionWs.consSum[c]) {
                     ok = false;
                     break;
                 }
             }
             if (ok) {
-                for (int c : tlBoxLimits[idx]) {
-                    tlCurSum[c] += k;
-                    tlSizeSum[c] += maxK;
+                for (int c : distributionWs.boxLimits[idx]) {
+                    distributionWs.curSum[c] += k;
+                    distributionWs.sizeSum[c] += maxK;
                 }
                 self(self, idx + 1, curWays * binom(maxK, k));
-                for (int c : tlBoxLimits[idx]) {
-                    tlCurSum[c] -= k;   // 回溯
-                    tlSizeSum[c] -= maxK;
+                for (int c : distributionWs.boxLimits[idx]) {
+                    distributionWs.curSum[c] -= k;   // 回溯
+                    distributionWs.sizeSum[c] -= maxK;
                 }
             }
         }
@@ -211,31 +208,29 @@ inline const Distribution* Distribution::Solver::analyze(const Structure::Shape&
     int maxTotal = 0;
     for (const auto& box : shape.boxes) maxTotal += box.size;
 
-    // 线程局部复用工作区（analyze 非重入、无并发）：避免每块新建嵌套 vector。
-    static thread_local std::vector<long double> wayTable;
-    static thread_local std::vector<long double> expectFlat;
-    wayTable.assign(maxTotal + 1, 0.0L);
-    expectFlat.assign((maxTotal + 1) * n, 0.0L);
+    // 复用工作区（core/workspaces.h，事务式：每次进入 assign 重置）。
+    distributionWs.wayTable.assign(maxTotal + 1, 0.0L);
+    distributionWs.expectFlat.assign((maxTotal + 1) * n, 0.0L);
 
     Distribution dist;
     forEachAssignment(shape, [&](const std::vector<char>& assignment, long double ways) {
         int total = 0;
         for (int i = 0; i < n; ++i) total += assignment[i];
-        wayTable[total] += ways;
+        distributionWs.wayTable[total] += ways;
         const std::size_t row = total * n;
         for (int i = 0; i < n; ++i)
-            expectFlat[row + i] += ways * assignment[i];
+            distributionWs.expectFlat[row + i] += ways * assignment[i];
     }, &dist.searchNodes);
 
     for (int total = 0; total <= maxTotal; ++total) {
-        if (wayTable[total] == 0) continue;
+        if (distributionWs.wayTable[total] == 0) continue;
         Entry e;
         e.mineCount = total;
-        e.ways = wayTable[total];
+        e.ways = distributionWs.wayTable[total];
         const std::size_t row = total * n;
         e.perBoxExpectation.resize(n);
         for (int i = 0; i < n; ++i)
-            e.perBoxExpectation[i] = expectFlat[row + i] / e.ways;
+            e.perBoxExpectation[i] = distributionWs.expectFlat[row + i] / e.ways;
         dist.entries.push_back(std::move(e));
     }
 

@@ -143,7 +143,8 @@ inline void testDistributionOrders(Rng& rng, const TestConfig& config) {
     int greatestWidth = -1;
     const char* greatestAlgorithm = nullptr;
     ObservedBoard greatestWidthBoard;
-    while (!timebox.expired() && counters().failures == 0) {
+    while ((config.games < 0 || games < config.games) &&
+           !timebox.expired() && counters().failures == 0) {
         ++games;
         generateGame(config, rng, [&](const Snapshot& snapshot) {
             if (timebox.expired() || counters().failures != 0) return;

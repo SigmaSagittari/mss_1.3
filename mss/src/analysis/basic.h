@@ -47,6 +47,16 @@ struct Basic {
         int unknownSum = 0;  // Unknown 格数量
         int mineSum = 0;     // Mine 格数量
         bool valid = true;   // 是否出现矛盾（无解）
+
+        // 数字格评估计数表（全盘维护，含非数字格）：恒等于 f(当前 marks)——
+        // mineAround[x][y] = 周围 Mine 数；hideAround[x][y] = 周围未定格数
+        // （Frontier|Unknown，即"雷候选池"大小）。update 的增量记账与
+        // applyDelta 的逐 change 记账保持其成立；评估数字格 O(1) 查表。
+        // 值域 [0..8]（8 邻域），记账中间态可达 -1，故用单字节有符号整数。
+        // 为什么是 Result 成员：表是 marks 的推导状态，必须跟随每份 Result
+        // （重放/撤销链上每份状态各有一份自己的表），不能进调用方工作区。
+        Grid<std::int8_t> mineAround;
+        Grid<std::int8_t> hideAround;
     };
 
     // 增量：原始揭示事件、标记变化集合与应用后的统计。
@@ -150,6 +160,22 @@ inline Basic::Result Basic::analyze(const ObservedBoard& state) {
         });
     }
 
+    // 3.5 计数表：全盘初始化（含非数字格——未来被翻开的数字格直接可用，
+    //     普通格的值由记账持续维护，与格角色无关）。
+    result.mineAround.resize(n, m, 0);
+    result.hideAround.resize(n, m, 0);
+    for (int i = 1; i <= n; ++i)
+        for (int j = 1; j <= m; ++j) {
+            int mc = 0, hc = 0;
+            forEachAdjacent(i, j, n, m, [&](int nx, int ny) {
+                const Mark mk = result.marks[nx][ny];
+                if (mk == Mark::Mine) ++mc;
+                else if (mk == Mark::Frontier || mk == Mark::Unknown) ++hc;
+            });
+            result.mineAround[i][j] = static_cast<std::int8_t>(mc);
+            result.hideAround[i][j] = static_cast<std::int8_t>(hc);
+        }
+
     // 4. 合法性检验：对每个数字，去掉周围安全格后，
     //    数字必须落在 [周围确定雷数, 未定格数] 区间内。
     for (int i = 1; i <= n; ++i)
@@ -189,10 +215,20 @@ inline Basic::Delta Basic::update(const ObservedBoard& board, Result& result,
     delta.oldValid = result.valid;
     const int rows = board.rows;
     const int cols = board.cols;
-    std::vector<CellId> pending;
 
-    // 标记某格：就地改 result + 维护统计 + 记录变化（含 old）。每次变化都令
-    // 相邻数字重新入队，驱动后续安全/危险格的泛洪判断。
+    // 复用工作区（调用期临时；容量跨调用保留）：
+    //   pending：数字格评估队列（判重）；queued：入队位图，**出队即复位**，
+    //   因此函数退出时恒为全零（本函数无中途返回，入队格必被遍历出队），
+    //   无需每轮清零——不变量：queued 只在 resize（尺寸变化）时置零。
+    static thread_local std::vector<CellId> pending;
+    static thread_local Grid<char> queued;
+    pending.clear();
+    if (queued.rows() != rows || queued.cols() != cols)
+        queued.resize(rows, cols, 0);
+
+    // 标记某格：就地改 result + 维护统计 + 记录变化（含 old）+
+    // **记账**（8 邻格计数表增量，与格角色无关；表恒等于 f(marks)）+
+    // 数字邻格入队（判重）。
     auto setMark = [&](int x, int y, Mark m) {
         Mark& cur = result.marks[x][y];
         if (cur == m) return;
@@ -204,7 +240,16 @@ inline Basic::Delta Basic::update(const ObservedBoard& board, Result& result,
         cur = m;
         delta.changes.push_back({board.id(x, y), oldMark, m});
         forEachAdjacent(x, y, rows, cols, [&](int nx, int ny) {
-            if (isNumber(board.board[nx][ny])) pending.push_back(board.id(nx, ny));
+            if (oldMark == Mark::Mine) --result.mineAround[nx][ny];
+            if (m == Mark::Mine) ++result.mineAround[nx][ny];
+            if (oldMark == Mark::Frontier || oldMark == Mark::Unknown)
+                --result.hideAround[nx][ny];
+            if (m == Mark::Frontier || m == Mark::Unknown)
+                ++result.hideAround[nx][ny];
+            if (isNumber(board.board[nx][ny]) && !queued[nx][ny]) {
+                queued[nx][ny] = 1;
+                pending.push_back(board.id(nx, ny));
+            }
         });
     };
 
@@ -221,7 +266,10 @@ inline Basic::Delta Basic::update(const ObservedBoard& board, Result& result,
 
         // 翻开数字：被翻格标 Safe（已揭示，非推理），邻居隐藏格接入前沿。
         setMark(x, y, Mark::Safe);
-        if (isNumber(board.board[x][y])) pending.push_back(u.cell);
+        if (isNumber(board.board[x][y]) && !queued[x][y]) {
+            queued[x][y] = 1;
+            pending.push_back(u.cell);  // 新数字格：初始化由 analyze 全盘表保证
+        }
         forEachAdjacent(x, y, rows, cols, [&](int nx, int ny) {
             // 邻居隐藏格：Unknown → Frontier。
             if (board.board[nx][ny] == Cell::Hidden && result.marks[nx][ny] == Mark::Unknown)
@@ -229,21 +277,17 @@ inline Basic::Delta Basic::update(const ObservedBoard& board, Result& result,
         });
     }
 
-    // 只重算受事件或标记变化影响的数字格；每次新结论会把相邻数字继续入队。
+    // 只重算受事件或标记变化影响的数字格（队列判重、出队复位）；评估直接
+    // 查计数表（mineAround/hideAround 恒等于 f(marks)，O(1)，不扫邻域）。
     for (std::size_t head = 0; head < pending.size(); ++head) {
         const auto [x, y] = board.pos(pending[head]);
-        int mineCount = 0, candidateCount = 0;
-        forEachAdjacent(x, y, rows, cols, [&](int nx, int ny) {
-            if (result.marks[nx][ny] == Mark::Mine) ++mineCount;
-            else if (board.board[nx][ny] == Cell::Hidden && result.marks[nx][ny] != Mark::Safe)
-                ++candidateCount;
-        });
-        const int remaining = numberValue(board.board[x][y]) - mineCount;
-        if (remaining < 0 || remaining > candidateCount) {
+        queued[x][y] = 0;  // 出队：邻域再变时允许再次入队（增量传播）
+        const int remaining = numberValue(board.board[x][y]) - result.mineAround[x][y];
+        if (remaining < 0 || remaining > result.hideAround[x][y]) {
             result.valid = false;
             continue;
         }
-        if (remaining != 0 && remaining != candidateCount) continue;
+        if (remaining != 0 && remaining != result.hideAround[x][y]) continue;
 
         const Mark mark = remaining == 0 ? Mark::Safe : Mark::Mine;
         forEachAdjacent(x, y, rows, cols, [&](int nx, int ny) {
@@ -261,6 +305,21 @@ inline Basic::Delta Basic::update(const ObservedBoard& board, Result& result,
 }
 
 inline void Basic::applyDelta(Result& result, const Delta& delta, bool reverse) {
+    using Mark = Basic::Mark;
+    // 记账：单格标记变化对 8 邻格计数表的增量（纯 mark 驱动，无需 board；
+    // 与 update::setMark 的记账完全一致，保证表在重放/撤销后仍 = f(marks)）。
+    auto account = [&](CellId cell, Mark oldMark, Mark nowMark) {
+        const int x = cell / (result.cols + 1);
+        const int y = cell % (result.cols + 1);
+        forEachAdjacent(x, y, result.rows, result.cols, [&](int nx, int ny) {
+            if (oldMark == Mark::Mine) --result.mineAround[nx][ny];
+            if (nowMark == Mark::Mine) ++result.mineAround[nx][ny];
+            if (oldMark == Mark::Frontier || oldMark == Mark::Unknown)
+                --result.hideAround[nx][ny];
+            if (nowMark == Mark::Frontier || nowMark == Mark::Unknown)
+                ++result.hideAround[nx][ny];
+        });
+    };
     if (reverse) {
         // 撤销：逆序回放标记（同格多次变化时逆序回退整链），统计恢复应用前值。
         for (std::size_t i = delta.changes.size(); i-- > 0;) {
@@ -268,6 +327,7 @@ inline void Basic::applyDelta(Result& result, const Delta& delta, bool reverse) 
             const int x = c.cell / (result.cols + 1);
             const int y = c.cell % (result.cols + 1);
             result.marks[x][y] = c.old;
+            account(c.cell, c.now, c.old);  // now→old 反向记账
         }
         result.unknownSum = delta.oldUnknownSum;
         result.mineSum = delta.oldMineSum;
@@ -278,6 +338,7 @@ inline void Basic::applyDelta(Result& result, const Delta& delta, bool reverse) 
         const int x = c.cell / (result.cols + 1);
         const int y = c.cell % (result.cols + 1);
         result.marks[x][y] = c.now;
+        account(c.cell, c.old, c.now);  // old→now 正向记账
     }
     result.unknownSum = delta.unknownSum;
     result.mineSum = delta.mineSum;

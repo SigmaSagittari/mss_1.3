@@ -30,7 +30,7 @@ inline void testDistributionRealGame(Rng& rng, const TestConfig& config) {
         double analyzeSeconds = 0.0;
     };
     std::vector<ClassStats> classes;
-    while (!timebox.expired()) {
+    while ((config.games < 0 || games < config.games) && !timebox.expired()) {
         ++games;
         Game game(config);
         game.placeMines(rng, config.firstMoveSafe);

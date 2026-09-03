@@ -68,6 +68,10 @@ inline void printProbabilityExtremes() {
               << e.positiveSamples << " interior samples)\n";
 }
 
+inline void logerr(std::string_view message) {
+    std::cerr << "\n[FAIL] " << message << '\n';
+}
+
 inline void logerr(std::string_view message, const ObservedBoard& board,
                    const Basic::Result* basic = nullptr,
                    const Structure::Result* structure = nullptr) {
@@ -104,16 +108,18 @@ inline void logerr(std::string_view message, const ObservedBoard& board,
 enum class PositionFilter { All, GuessOnly };
 // 分布层实现选择：Old = 旧 Distribution::Solver；Graph = 图算法实现。
 enum class DistributionMode { Old, Graph };
-// 所有测试模块共用的统一配置。perf 类模块的驱动量统一为时间盒（seconds），
-// 不再以局面数量为终止条件：跑满时间盒，输出该盒内的吞吐。
+// 统一时间盒：跑满时间盒即到期。seconds < 0 表示不限时（局数驱动模式，
+// expired() 恒为 false，终止由调用方的局数条件负责）。
 struct TimeBox {
     std::chrono::steady_clock::time_point start;
     std::chrono::steady_clock::time_point deadline;
 
     explicit TimeBox(double seconds)
         : start(std::chrono::steady_clock::now()),
-          deadline(start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                              std::chrono::duration<double>(seconds))) {}
+          deadline(seconds < 0
+                       ? std::chrono::steady_clock::time_point::max()
+                       : start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                     std::chrono::duration<double>(seconds))) {}
 
     bool expired() const { return std::chrono::steady_clock::now() >= deadline; }
     double elapsedSeconds() const {
@@ -123,17 +129,21 @@ struct TimeBox {
     }
 };
 
-// 所有真实对局测试共用的采样配置。每个测试只额外声明自身特有的参数。
+// 所有真实对局测试共用的采样配置。**不留默认值**：harness main 必须显式写出
+// 全部字段（方便手动改参数）。驱动量二选一：
+//   seconds >= 0 → 时间盒驱动；games >= 0 → 局数驱动；
+//   其中一个为 -1 表示由另一个控制；两者都为 -1 是配置错误（main 里 logerr 拒绝）。
 struct TestConfig {
-    int rows = 16;
-    int cols = 30;
-    int mines = 99;
-    double seconds = 60.0;             // 统一时间盒（perf 模块的驱动量）
-    PositionFilter filter = PositionFilter::All;  // All：全部局面；GuessOnly：只留必须猜的局面
-    DistributionMode distributionMode = DistributionMode::Graph;  // 默认新版图算法
-    int maxRestarts = 10000;                      // requireWinningGame 时生成一条可赢对局的重试上限
-    bool requireWinningGame = false;
-    bool firstMoveSafe = false;
+    int rows;
+    int cols;
+    int mines;
+    double seconds;              // >=0：时间盒（秒）；-1：由 games 控制
+    int games;                   // >=0：游戏局数；-1：由 seconds 控制
+    PositionFilter filter;       // All：全部局面；GuessOnly：只留必须猜的局面
+    DistributionMode distributionMode;
+    int maxRestarts;             // requireWinningGame 时生成一条可赢对局的重试上限
+    bool requireWinningGame;
+    bool firstMoveSafe;
 };
 
 struct Game {
