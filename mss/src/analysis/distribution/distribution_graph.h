@@ -5,12 +5,12 @@
 #include <climits>
 #include <iostream>
 #include <memory>
-#include <span>
 #include <utility>
 #include <vector>
 
 #include "analysis/basic.h"
 #include "analysis/structure.h"
+#include "core/assert.h"
 #include "core/types.h"
 #include "core/utility/flat_hashtable.h"
 #include "core/utility/hash.h"
@@ -130,18 +130,8 @@ private:
     // （直径端点、lexBFS、两种抛光）是图自己的子函数。Graph 整体归 solver
     // 私有持有，父子一体，方法成员直接可见，无需友元。
     struct Graph {
-        // CSR 邻接表：box b 的邻居位于 adjacent[offsets[b], offsets[b + 1])。
-        // 只分配两段连续存储，不为每个 box 单独分配 vector。
-        std::vector<int> offsets;
-        std::vector<BoxId> adjacent;
-
-        static Graph fromShape(const Structure::Shape& shape);
-        int boxCount() const { return static_cast<int>(offsets.size()) - 1; }
-        std::span<const BoxId> neighbors(BoxId box) const {
-            const int begin = offsets[box];
-            const int end = offsets[box + 1];
-            return {adjacent.data() + begin, static_cast<std::size_t>(end - begin)};
-        }
+        // 仅按 Shape 的 BoxId 编号（测试探针要直接组装/校验，公开）。
+        std::vector<std::vector<BoxId>> neighbors;
 
         // 展开起点：从 box 0 出发的 DFS 最远端点（启发式；原"双扫"的第二段
         // 端点无人使用，已删）。测试探针取 init 用，公开。
@@ -150,21 +140,21 @@ private:
         // 对外只暴露两个成品入口：默认先用 lexBfsOrder(diameterStart())
         // 取展开序再抛光。
 
-        // 相邻交换抛光成品（默认 2 轮），写入调用方复用的 order 缓冲。
-        void polishAdjacent(BoxId init, std::vector<BoxId>& order) const;
+        // 相邻交换抛光成品（默认 2 轮）。
+        std::vector<BoxId> polishAdjacent(BoxId init) const;
 
-        // 3 窗口全排列抛光成品，写入调用方复用的 order 缓冲。
-        void polishWindow3(BoxId init, std::vector<BoxId>& order) const;
+        // 3 窗口全排列抛光成品。
+        std::vector<BoxId> polishWindow3(BoxId init) const;
 
     private:
         // LexBFS 展开序（起点经 diameterStart 选取）：只被默认抛光入口
         // 调用，不外露。
-        void lexBfsOrder(BoxId init, std::vector<BoxId>& order) const;
+        std::vector<BoxId> lexBfsOrder(BoxId init) const;
 
         // 抛光核心（相邻交换 rounds 轮，默认 2 / 3 窗口全排列）：给定 order
         // 就地抛光后返回。只被上面的默认入口调用，不外露。
-        void polishAdjacent(std::vector<BoxId>& order, int rounds = 2) const;
-        void polishWindow3(std::vector<BoxId>& order) const;
+        std::vector<BoxId> polishAdjacent(std::vector<BoxId> order, int rounds = 2) const;
+        std::vector<BoxId> polishWindow3(std::vector<BoxId> order) const;
     };
 
     // ── 前沿 DP：状态压缩到"前沿"，SoA 平铺 ──
@@ -192,12 +182,12 @@ private:
     //   关闭：box b 的关闭层 closeStep = b 所有约束 lastPos 的最大值，
     //         因为 b 需要保留 ⟺ 它还有约束未封口。
     //
-    // M 通道：moments[state][box] = Σ(ways × x)。box 关闭的那一步写入
-    // 自己的 moment；之后随路径权重缩放、与同 Key 状态相加。momentBoxes
-    // 只列出已经关闭的 box，所以合并不扫描尚未写入的零列。
+    // M 通道：columns[state][box]，列 = Σ(ways × x)：box 关闭那一层写入
+    // x × 分支权重，之后随分支缩放（未关闭列恒 0，缩放/合并循环只走
+    // "已关闭"列，closedSoFar 静态维护），末层 ÷ ways 得 perBoxExpectation。
     //
-    // 平铺与复用：StateTable 用平铺数组保存 Key、Value、frontier 与 moments；
-    // 两层 thread_local 表交替复用跨调用容量，无逐状态 vector/堆分配。
+    // 平铺与复用：一层用 SoA（ways/columns/mineCounts/packed + 哈希索引），
+    // 无逐状态 vector/堆分配；两层缓冲 thread_local 交替复用跨调用容量。
     class dpHelper {
     public:
         // 入口：返回单组件分布表（契约同旧 Solver::analyze，entries 按
@@ -208,61 +198,53 @@ private:
                               const Structure::Shape& shape);
 
     private:
-        // StepPlan 是与路径无关的单步程序：analysis 由 Shape + order 编译一
-        // 步后立刻交给 StateTable 执行；运行期不再碰 Shape、layout 或
-        // box→slot 映射。
-        struct StepPlan {
-            struct Check {
-                int sum = 0;
-                int remAfter = 0;
-                // 一个数字格最多邻接八个 box；这里只保留本步之前、仍在
-                // frontier 中的成员槽位。
-                std::array<int, 8> readSlots{};
-                int readSlotCount = 0;
-            };
-            struct Closing {
-                BoxId box = 0;
-                int oldSlot = -1;  // -1 表示本步赋值的 box
-            };
-
-            BoxId box = 0;
-            int boxSize = 0;
-            std::vector<Check> checks;
-            std::vector<int> gather;       // 新 frontier 槽 → 旧槽，-1 = box 新槽
-            std::vector<Closing> closings; // 本步结算 moments 的 box
-        };
-
-        struct StateKey {
-            int mineCount = 0;
-        };
-
-        struct StateValue {
-            long double ways = 0.0L;
-        };
-
-        // 一层 DP 表。同层状态共享 frontier 宽度；frontiers 与 moments 都按
-        // 状态平铺。momentBoxes 只记录哪些列已经有值，因此合并不扫描零列。
-        class StateTable {
-        public:
-            void reset(int boxCount);
-            void advance(const StepPlan& plan, StateTable& next) const;
-
-            std::vector<StateKey> keys;
-            std::vector<StateValue> values;
-            std::vector<char> frontiers;
-            std::vector<long double> moments;
-            std::vector<BoxId> momentBoxes;
+        // 一层的状态表（SoA 平铺）。同层所有状态共享同一 layout（静态）。
+        struct Layer {
+            std::vector<long double> ways;     // [state]
+            std::vector<long double> columns;  // [state * boxCount + box]
+            std::vector<int> mineCounts;       // [state]
+            std::vector<char> packed;          // [state * frontier + slot]
             FlatHashTable<U128, std::size_t, U128Hash> index;
-            int boxCount = 0;
-            int frontierSize = 0;
+            int boxCount = 0;  // columns 行宽（= 组件 box 数）
+            int frontier = 0;  // packed 行宽（= 当前层 open box 数）
 
-        private:
-            static U128 hashKey(int mineCount, const char* frontier, int frontierSize);
-
-            // 归 next 所有，跨 advance 调用复用；它们不是 DP 状态。
-            mutable std::vector<char> frontierWork;
-            mutable std::vector<long double> momentWork;
+            std::size_t count() const { return ways.size(); }
         };
+
+        // 内层检查一个约束所需的全部数据（外层逐层构造）。
+        // 设 s = 该约束已赋值成员的和 = Σ_{m∈members} 槽[m]（v 未赋值，
+        // 其槽为 0，故 members 给全体成员即可，无需区分已赋值子集）。
+        // 对候选 k（本步给 v 的雷数），要求同时满足：
+        //   s + k ≤ sum                   上界，超出即剪；
+        //   s + k + remAfter ≥ sum        下界，后面成员全摆满也不够即剪；
+        //   remAfter == 0 时上下界夹出唯一解 k = sum - s，即封口（v 是
+        //   本约束最后一个被赋值的成员），k 偏离即该历史非法。
+        // remAfter = 处理完 v 后本约束仍未赋值的成员 size 之和（不含
+        // v），由成员在 order 中的位置静态求出。
+        struct Check {
+            const Structure::Shape::Constraint* constraint = nullptr;
+            int remAfter = 0;  // 处理后剩余成员的 size 和，0 = 封口
+        };
+
+        // 单步转移的静态上下文（analysis 逐层构造，用完即弃）。
+        struct Transition {
+            BoxId v = 0;                             // 本步赋值的 box
+            int boxSize = 0;
+            const std::vector<BoxId>* closed = nullptr;  // 本步关闭的 box
+            const std::vector<Check>* checks = nullptr;  // 本步检查的约束
+            const std::vector<int>* slotOf = nullptr;    // box → 旧层槽位（-1 = 不在）
+            const std::vector<int>* gather = nullptr;    // 新槽 d → 旧槽（-1 = v 新增）
+            int newFrontier = 0;                         // 新层 open box 数
+        };
+
+        // 单层转移：before（层 k 表）→ after（层 k+1 表，写进线程局部
+        // 池复用）。对每条状态：按 checks 收窄 k 的可行区间（封口定值后
+        // 不提前退出，要过完 v 的全部约束再统一判区间），枚举可行 k；
+        // 新状态 = 按 gather 拷贝旧 packed + v 槽写 k；
+        // 新值 = 已关闭列 × C + 本层关闭列写入（x × 分支权重）+ ways × C；
+        // 同键合并。closedSoFar = 本层之前已关闭的 box（列非零）。
+        void transition(const Layer& before, Layer& after, const Transition& tr,
+                        const std::vector<BoxId>& closedSoFar) const;
     };
 
     // 测试访问口：定义于 test/distribution/greedy_order.h。Graph 整体私有，
@@ -311,123 +293,128 @@ inline long double DistributionSolver::binom(int n, int k) {
         return t;
         }();
 
+    // 调用方保证 0<=k<=n<=box.size<=kMax；越界=结构 bug。
+    assert_(k >= 0 && k <= n && n <= kMax, "Distribution:binom: 参数越界");
 #if defined(_MSC_VER) && defined(_PREFAST_)
-    // 调用方保证 0<=k<=n<=box.size<=kMax；仅向静态分析器给出这个契约。
+    // /analyze 无法从 assert_（普通函数）推断数组下界，这里显式告知
+    // 分析器边界成立（仅代码分析时生效，不生成任何代码）。
     __analysis_assume(k >= 0 && k <= n && n <= kMax);
 #endif
     return kComb[n][k];
 }
 
-inline U128 DistributionSolver::dpHelper::StateTable::hashKey(
-    int mineCount, const char* frontier, int frontierSize) {
-    U128Hasher hasher;
-    hasher.mix(mineCount);
-    for (int slot = 0; slot < frontierSize; ++slot)
-        hasher.mix(static_cast<std::uint64_t>(
-            static_cast<unsigned char>(frontier[slot])));
-    return hasher.finalize();
-}
+inline void DistributionSolver::dpHelper::transition(
+    const Layer& before, Layer& after, const Transition& tr,
+    const std::vector<BoxId>& closedSoFar) const {
+    // 复用 after 的容量（清除不释放）：层间与跨 analyze 调用都避免重分配。
+    after.ways.clear();
+    after.mineCounts.clear();
+    after.packed.clear();
+    after.columns.clear();
+    after.index.clear();
+    after.boxCount = before.boxCount;
+    after.frontier = tr.newFrontier;
 
-inline void DistributionSolver::dpHelper::StateTable::reset(int initialBoxCount) {
-    keys.clear();
-    values.clear();
-    frontiers.clear();
-    moments.clear();
-    momentBoxes.clear();
-    index.clear();
-    boxCount = initialBoxCount;
-    frontierSize = 0;
-    keys.push_back(StateKey{.mineCount = 0});
-    values.push_back(StateValue{.ways = 1.0L});
-    moments.assign(boxCount, 0.0L);
-}
+    const int boxCount = after.boxCount;
+    const int oldFrontier = before.frontier;
+    const int newFrontier = after.frontier;
 
-inline void DistributionSolver::dpHelper::StateTable::advance(
-    const StepPlan& plan, StateTable& next) const {
-    next.keys.clear();
-    next.values.clear();
-    next.frontiers.clear();
-    next.moments.clear();
-    next.index.clear();
-    next.boxCount = boxCount;
-    next.frontierSize = static_cast<int>(plan.gather.size());
-    next.momentBoxes = momentBoxes;
-    for (const StepPlan::Closing& closing : plan.closings)
-        next.momentBoxes.push_back(closing.box);
+    const std::size_t estimate =
+        before.count() * static_cast<std::size_t>(tr.boxSize + 1);
+    after.ways.reserve(estimate);
+    after.mineCounts.reserve(estimate);
+    after.packed.reserve(estimate * static_cast<std::size_t>(newFrontier));
+    after.columns.reserve(estimate * static_cast<std::size_t>(boxCount));
+    after.index.reserve(estimate);
 
-    const std::size_t estimate = keys.size() * (plan.boxSize + 1);
-    next.keys.reserve(estimate);
-    next.values.reserve(estimate);
-    next.frontiers.reserve(estimate * next.frontierSize);
-    next.moments.reserve(estimate * boxCount);
-    next.index.reserve(estimate);
-    if (next.frontierWork.size() < next.frontierSize)
-        next.frontierWork.resize(next.frontierSize);
-    if (next.momentWork.size() < boxCount)
-        next.momentWork.resize(boxCount);
+    // 每转移的临时行：线程局部复用（只增长不释放），避免逐状态堆分配。
+    static thread_local std::vector<char> packedRow;
+    static thread_local std::vector<long double> colRow;
+    if (packedRow.size() < static_cast<std::size_t>(newFrontier))
+        packedRow.resize(static_cast<std::size_t>(newFrontier));
+    if (colRow.size() < static_cast<std::size_t>(boxCount))
+        colRow.resize(static_cast<std::size_t>(boxCount));
 
-    for (std::size_t state = 0; state < keys.size(); ++state) {
-        const StateKey key = keys[state];
-        const long double ways = values[state].ways;
-        const char* frontier =
-            frontiers.data() + state * frontierSize;
-        const long double* moment =
-            moments.data() + state * boxCount;
+    const std::vector<BoxId>& closed = *tr.closed;
+    const std::vector<Check>& checks = *tr.checks;
+    const std::vector<int>& slotOf = *tr.slotOf;
+    const std::vector<int>& gather = *tr.gather;
 
+    for (std::size_t s = 0; s < before.count(); ++s) {
+        const long double ways = before.ways[s];
+        const int t = before.mineCounts[s];
+        const char* packedSrc =
+            before.packed.data() + s * static_cast<std::size_t>(oldFrontier);
+        const long double* colSrc =
+            before.columns.data() + s * static_cast<std::size_t>(boxCount);
+
+        // 按 checks 收窄 k 的可行区间（封口定值后不提前退出，统一判）。
+        // 成员的槽在旧层 slotOf 里：未赋值/已关闭 = -1 → 贡献 0。
         int minMine = 0;
-        int maxMine = plan.boxSize;
-        for (const StepPlan::Check& check : plan.checks) {
+        int maxMine = tr.boxSize;
+        for (const Check& check : checks) {
             int partial = 0;
-            for (int i = 0; i < check.readSlotCount; ++i)
-                partial += frontier[check.readSlots[i]];
-            minMine = std::max(minMine, check.sum - partial - check.remAfter);
-            maxMine = std::min(maxMine, check.sum - partial);
+            for (BoxId member : check.constraint->boxIds) {
+                const int slot = slotOf[static_cast<std::size_t>(member)];
+                if (slot >= 0) partial += packedSrc[static_cast<std::size_t>(slot)];
+            }
+            minMine = std::max(minMine, check.constraint->sum - partial - check.remAfter);
+            maxMine = std::min(maxMine, check.constraint->sum - partial);
         }
 
-        for (int mine = minMine; mine <= maxMine; ++mine) {
-            const long double factor = DistributionSolver::binom(plan.boxSize, mine);
-            const long double nextWays = ways * factor;
-            for (int slot = 0; slot < next.frontierSize; ++slot) {
-                const int source = plan.gather[slot];
-                next.frontierWork[slot] =
-                    source < 0 ? static_cast<char>(mine)
-                               : frontier[source];
-            }
-            std::fill(next.momentWork.begin(),
-                      next.momentWork.begin() + boxCount, 0.0L);
-            for (BoxId box : momentBoxes)
-                next.momentWork[box] =
-                    moment[box] * factor;
-            for (const StepPlan::Closing& closing : plan.closings) {
-                const long double boxMineCount = closing.oldSlot < 0
-                    ? static_cast<long double>(mine)
-                    : static_cast<long double>(frontier[closing.oldSlot]);
-                next.momentWork[closing.box] +=
-                    boxMineCount * nextWays;
+        for (int k = minMine; k <= maxMine; ++k) {
+            const long double factor = DistributionSolver::binom(tr.boxSize, k);
+            const long double waysNext = ways * factor;
+
+            // 新状态 packed：按 gather 拷旧槽，v 新槽写 k（gather = -1）。
+            for (int d = 0; d < newFrontier; ++d) {
+                const int src = gather[static_cast<std::size_t>(d)];
+                packedRow[static_cast<std::size_t>(d)] =
+                    src < 0 ? static_cast<char>(k)
+                            : packedSrc[static_cast<std::size_t>(src)];
             }
 
-            const int nextMineCount = key.mineCount + mine;
-            const U128 hash = hashKey(nextMineCount, next.frontierWork.data(), next.frontierSize);
-            if (const std::size_t* found = next.index.find(hash)) {
+            // 新列：清零 → 已关闭列 × factor → 本层关闭列写入 x × waysNext。
+            // （未赋值/未关闭列恒 0，缩放与合并只走非零列。）
+            std::fill(colRow.begin(), colRow.begin() + boxCount, 0.0L);
+            for (BoxId b : closedSoFar)
+                colRow[static_cast<std::size_t>(b)] =
+                    colSrc[static_cast<std::size_t>(b)] * factor;
+            for (BoxId b : closed) {
+                const long double xb =
+                    b == tr.v   // v 本层赋值即关闭（不在旧层，值 = k）
+                        ? static_cast<long double>(k)
+                        : static_cast<long double>(packedSrc[static_cast<std::size_t>(
+                              slotOf[static_cast<std::size_t>(b)])]);
+                colRow[static_cast<std::size_t>(b)] += xb * waysNext;
+            }
+
+            // 合并键 = mineCount + packed（关闭/未赋值槽不参与，等价旧全向量判据）。
+            U128Hasher hasher;
+            hasher.mix(t + k);
+            for (int d = 0; d < newFrontier; ++d)
+                hasher.mix(static_cast<std::uint64_t>(
+                    static_cast<unsigned char>(packedRow[static_cast<std::size_t>(d)])));
+            const U128 hash = hasher.finalize();
+
+            if (const std::size_t* found = after.index.find(hash)) {
                 const std::size_t target = *found;
-                next.values[target].ways += nextWays;
-                long double* targetMoment =
-                    next.moments.data() + target * boxCount;
-                for (BoxId box : momentBoxes)
-                    targetMoment[box] +=
-                        next.momentWork[box];
-                for (const StepPlan::Closing& closing : plan.closings)
-                    targetMoment[closing.box] +=
-                        next.momentWork[closing.box];
+                after.ways[target] += waysNext;
+                long double* colTarget =
+                    after.columns.data() + target * static_cast<std::size_t>(boxCount);
+                for (BoxId b : closedSoFar)
+                    colTarget[static_cast<std::size_t>(b)] += colRow[static_cast<std::size_t>(b)];
+                for (BoxId b : closed)
+                    colTarget[static_cast<std::size_t>(b)] += colRow[static_cast<std::size_t>(b)];
             } else {
-                const std::size_t id = next.keys.size();
-                next.keys.push_back(StateKey{.mineCount = nextMineCount});
-                next.values.push_back(StateValue{.ways = nextWays});
-                next.frontiers.insert(next.frontiers.end(), next.frontierWork.begin(),
-                                      next.frontierWork.begin() + next.frontierSize);
-                next.moments.insert(next.moments.end(), next.momentWork.begin(),
-                                    next.momentWork.begin() + boxCount);
-                next.index.emplace(hash, id);
+                const std::size_t id = after.count();
+                after.ways.push_back(waysNext);
+                after.mineCounts.push_back(t + k);
+                after.packed.insert(after.packed.end(), packedRow.begin(),
+                                    packedRow.begin() + newFrontier);
+                after.columns.insert(after.columns.end(), colRow.begin(),
+                                     colRow.begin() + boxCount);
+                after.index.emplace(hash, id);
             }
         }
     }
@@ -436,223 +423,136 @@ inline void DistributionSolver::dpHelper::StateTable::advance(
 inline DistributionSolver::Distribution DistributionSolver::dpHelper::analysis(
     const std::vector<BoxId>& order, const Structure::Shape& shape) {
     const int boxCount = static_cast<int>(shape.boxes.size());
-    static thread_local std::vector<int> position;
-    position.resize(boxCount);
+    std::vector<int> position(boxCount);
     for (int step = 0; step < boxCount; ++step)
-        position[order[step]] = step;
+        position[order[static_cast<std::size_t>(step)]] = step;
 
-    static thread_local std::vector<int> closeStep;
-    closeStep = position;
-    // 约束→box 关联用单条链表平铺，避免每个 box 各自分配一个小 vector。
-    static thread_local std::vector<int> constraintHead;
-    static thread_local std::vector<int> constraintNext;
-    static thread_local std::vector<int> constraintIds;
-    constraintHead.assign(boxCount, -1);
-    constraintNext.clear();
-    constraintIds.clear();
-    std::size_t constraintIncidences = 0;
-    for (const Structure::Shape::Constraint& constraint : shape.constraints)
-        constraintIncidences += constraint.boxIds.size();
-    constraintNext.reserve(constraintIncidences);
-    constraintIds.reserve(constraintIncidences);
-    for (int constraintId = 0; constraintId < static_cast<int>(shape.constraints.size());
-         ++constraintId) {
-        const Structure::Shape::Constraint& constraint =
-            shape.constraints[constraintId];
+    std::vector<int> closeStep = position;
+    std::vector<std::vector<Check>> checksByStep(boxCount);
+    for (const Structure::Shape::Constraint& constraint : shape.constraints) {
         int lastStep = -1;
         for (BoxId box : constraint.boxIds)
-            lastStep = std::max(lastStep, position[box]);
+            lastStep = std::max(lastStep, position[static_cast<std::size_t>(box)]);
+        for (BoxId box : constraint.boxIds)
+            closeStep[static_cast<std::size_t>(box)] =
+                std::max(closeStep[static_cast<std::size_t>(box)], lastStep);
+
         for (BoxId box : constraint.boxIds) {
-            closeStep[box] =
-                std::max(closeStep[box], lastStep);
-            const std::size_t index = constraintIds.size();
-            constraintNext.push_back(constraintHead[box]);
-            constraintIds.push_back(constraintId);
-            constraintHead[box] = static_cast<int>(index);
+            Check check;
+            check.constraint = &constraint;
+            for (BoxId member : constraint.boxIds)
+                if (position[static_cast<std::size_t>(member)] >
+                    position[static_cast<std::size_t>(box)])
+                    check.remAfter += shape.boxes[static_cast<std::size_t>(member)].size;
+            checksByStep[static_cast<std::size_t>(position[static_cast<std::size_t>(box)])]
+                .push_back(std::move(check));
         }
     }
 
-    static thread_local std::vector<BoxId> closeHead;
-    static thread_local std::vector<BoxId> closeNext;
-    closeHead.assign(boxCount, -1);
-    closeNext.assign(boxCount, -1);
-    for (BoxId box = 0; box < boxCount; ++box) {
-        const int step = closeStep[box];
-        closeNext[box] = closeHead[step];
-        closeHead[step] = box;
-    }
+    std::vector<std::vector<BoxId>> closedByStep(boxCount);
+    for (BoxId box = 0; box < boxCount; ++box)
+        closedByStep[static_cast<std::size_t>(closeStep[static_cast<std::size_t>(box)])]
+            .push_back(box);
 
-    // 编译步骤计划：运行时不再构造 layout 或查询 constraint->boxIds。
-    static thread_local std::vector<BoxId> layout;
-    static thread_local std::vector<int> slotOf;
-    static thread_local std::vector<char> closeStamp;
-    static thread_local std::vector<BoxId> nextLayout;
-    layout.clear();
-    slotOf.assign(boxCount, -1);
-    closeStamp.assign(boxCount, 0);
-    nextLayout.clear();
+    // 流式布局：open 集（order-position 升序）+ box→槽位映射 + 转移 gather。
+    // 每层布局由"上一布局 - 本层关闭 + 追加 v"静态推出，DP 内无映射维护。
+    std::vector<BoxId> layout;
+    std::vector<int> slotOf(boxCount, -1);
+    std::vector<char> closeStamp(boxCount, 0);
+    std::vector<int> gather;
+    std::vector<BoxId> nextLayout;
+    std::vector<BoxId> closedSoFar;
     layout.reserve(boxCount);
+    gather.reserve(boxCount);
     nextLayout.reserve(boxCount);
+    closedSoFar.reserve(boxCount);
 
-    // 线程局部双层表：StateTable 的容量跨 analyze 调用复用。
-    static thread_local StateTable tlCur;
-    static thread_local StateTable tlNext;
-    StateTable* cur = &tlCur;
-    StateTable* next = &tlNext;
-    cur->reset(boxCount);
+    // 线程局部双层池：cur/next 交替，跨 analyze 调用复用容量。
+    static thread_local Layer tlCur;
+    static thread_local Layer tlNext;
+    Layer* cur = &tlCur;
+    Layer* next = &tlNext;
 
-    // StepPlan 只在编译完成的那一刻被消费；复用它的三个缓冲区，避免每个
-    // component 为每一步各自分配一组 vector。
-    static thread_local StepPlan plan;
+    // 初始层：单状态（t=0，ways=1，packed 空，列全 0）。
+    cur->ways.assign(1, 1.0L);
+    cur->mineCounts.assign(1, 0);
+    cur->packed.clear();
+    cur->columns.assign(static_cast<std::size_t>(boxCount), 0.0L);
+    cur->boxCount = boxCount;
+    cur->frontier = 0;
+    cur->index.clear();
+
     for (int step = 0; step < boxCount; ++step) {
-        plan.checks.clear();
-        plan.gather.clear();
-        plan.closings.clear();
-        plan.box = order[step];
-        plan.boxSize = shape.boxes[plan.box].size;
-        for (int index = constraintHead[plan.box]; index >= 0;
-             index = constraintNext[index]) {
-            const Structure::Shape::Constraint& constraint =
-                shape.constraints[constraintIds[index]];
-            StepPlan::Check check;
-            check.sum = constraint.sum;
-            for (BoxId member : constraint.boxIds) {
-                const int memberStep = position[member];
-                if (memberStep < step)
-                    check.readSlots[check.readSlotCount++] =
-                        slotOf[member];
-                else if (memberStep > step)
-                    check.remAfter += shape.boxes[member].size;
-            }
-            plan.checks.push_back(check);
-        }
+        const BoxId v = order[static_cast<std::size_t>(step)];
 
-        for (BoxId box = closeHead[step]; box >= 0;
-             box = closeNext[box])
-            closeStamp[box] = 1;
+        Transition tr;
+        tr.v = v;
+        tr.boxSize = shape.boxes[static_cast<std::size_t>(v)].size;
+        tr.closed = &closedByStep[static_cast<std::size_t>(step)];
+        tr.checks = &checksByStep[static_cast<std::size_t>(step)];
+        tr.slotOf = &slotOf;
+
+        // 本层关闭标记（stamp 免清零）→ 幸存者过滤；v 按 order-position
+        // 恒追加在末尾（closeStep[v] == step 时本层赋值即关闭，不追加）。
+        for (BoxId b : closedByStep[static_cast<std::size_t>(step)])
+            closeStamp[static_cast<std::size_t>(b)] = 1;
+        gather.clear();
         nextLayout.clear();
-        for (std::size_t oldSlot = 0; oldSlot < layout.size(); ++oldSlot) {
-            const BoxId box = layout[oldSlot];
-            if (closeStamp[box]) continue;
-            plan.gather.push_back(static_cast<int>(oldSlot));
-            nextLayout.push_back(box);
+        for (std::size_t i = 0; i < layout.size(); ++i) {
+            const BoxId b = layout[i];
+            if (closeStamp[static_cast<std::size_t>(b)]) continue;
+            gather.push_back(static_cast<int>(i));
+            nextLayout.push_back(b);
         }
-        if (closeStep[plan.box] > step) {
-            plan.gather.push_back(-1);
-            nextLayout.push_back(plan.box);
+        if (closeStep[static_cast<std::size_t>(v)] > step) {
+            gather.push_back(-1);  // v 新槽
+            nextLayout.push_back(v);
         }
-        for (BoxId box = closeHead[step]; box >= 0;
-             box = closeNext[box])
-            plan.closings.push_back(StepPlan::Closing{
-                .box = box,
-                .oldSlot = box == plan.box ? -1 : slotOf[box],
-            });
+        tr.gather = &gather;
+        tr.newFrontier = static_cast<int>(nextLayout.size());
 
-        cur->advance(plan, *next);
+        transition(*cur, *next, tr, closedSoFar);
+
         std::swap(cur, next);
-
         std::fill(slotOf.begin(), slotOf.end(), -1);
-        for (int slot = 0; slot < static_cast<int>(nextLayout.size()); ++slot)
-            slotOf[nextLayout[slot]] = slot;
+        for (int d = 0; d < static_cast<int>(nextLayout.size()); ++d)
+            slotOf[static_cast<std::size_t>(nextLayout[static_cast<std::size_t>(d)])] = d;
         layout.swap(nextLayout);
-        for (BoxId box = closeHead[step]; box >= 0;
-             box = closeNext[box])
-            closeStamp[box] = 0;
+        for (BoxId b : closedByStep[static_cast<std::size_t>(step)])
+            closeStamp[static_cast<std::size_t>(b)] = 0;
+        closedSoFar.insert(closedSoFar.end(),
+                           closedByStep[static_cast<std::size_t>(step)].begin(),
+                           closedByStep[static_cast<std::size_t>(step)].end());
     }
 
     // 末层物化：按 mineCount 升序出 entries（列 ÷ ways = perBoxExpectation）。
-    const std::size_t stateCount = cur->keys.size();
+    const std::size_t stateCount = cur->count();
+    std::vector<std::size_t> orderIdx(stateCount);
+    for (std::size_t i = 0; i < stateCount; ++i) orderIdx[i] = i;
+    std::sort(orderIdx.begin(), orderIdx.end(),
+              [&](std::size_t a, std::size_t b) {
+                  return cur->mineCounts[a] < cur->mineCounts[b];
+              });
+
     Distribution result;
-    result.entries.reserve(stateCount);
-    for (std::size_t row = 0; row < stateCount; ++row) {
+    for (std::size_t row : orderIdx) {
         Distribution::Entry entry;
-        entry.mineCount = cur->keys[row].mineCount;
-        entry.ways = cur->values[row].ways;
+        entry.mineCount = cur->mineCounts[row];
+        entry.ways = cur->ways[row];
         entry.perBoxExpectation.resize(boxCount);
-        const long double* moment =
-            cur->moments.data() + row * boxCount;
+        const long double* col =
+            cur->columns.data() + row * static_cast<std::size_t>(boxCount);
         for (int box = 0; box < boxCount; ++box)
             entry.perBoxExpectation[box] =
-                moment[box] / entry.ways;
+                col[static_cast<std::size_t>(box)] / entry.ways;
         result.entries.push_back(std::move(entry));
     }
-    std::sort(result.entries.begin(), result.entries.end(),
-              [](const Distribution::Entry& lhs, const Distribution::Entry& rhs) {
-                  return lhs.mineCount < rhs.mineCount;
-              });
     return result;
-}
-
-inline DistributionSolver::Graph DistributionSolver::Graph::fromShape(
-    const Structure::Shape& shape) {
-    Graph graph;
-    const int boxCount = static_cast<int>(shape.boxes.size());
-    graph.offsets.assign(boxCount + 1, 0);
-
-    // 先以链式前向星收集候选边。一个约束内的 box 对天然是双向边；跨约束
-    // 的重复在转 CSR 时按源点用 marks 去掉，不需要 hash 表。
-    static thread_local std::vector<int> head;
-    static thread_local std::vector<BoxId> to;
-    static thread_local std::vector<int> next;
-    static thread_local std::vector<char> marked;
-    head.assign(boxCount, -1);
-    to.clear();
-    next.clear();
-    marked.assign(boxCount, false);
-
-    auto addEdge = [&](BoxId from, BoxId target) {
-        next.push_back(head[from]);
-        to.push_back(target);
-        head[from] = static_cast<int>(to.size()) - 1;
-    };
-    for (const Structure::Shape::Constraint& constraint : shape.constraints)
-        for (std::size_t i = 0; i < constraint.boxIds.size(); ++i)
-            for (std::size_t j = i + 1; j < constraint.boxIds.size(); ++j) {
-                const BoxId lhs = constraint.boxIds[i];
-                const BoxId rhs = constraint.boxIds[j];
-                addEdge(lhs, rhs);
-                addEdge(rhs, lhs);
-            }
-
-    // 第一遍：按源点去重并统计 CSR 行宽；第二遍会沿同一链表回退清除标记。
-    for (BoxId box = 0; box < boxCount; ++box) {
-        for (int edge = head[box]; edge >= 0;
-             edge = next[edge]) {
-            const BoxId target = to[edge];
-            if (marked[target]) continue;
-            marked[target] = true;
-            ++graph.offsets[box + 1];
-        }
-        for (int edge = head[box]; edge >= 0;
-             edge = next[edge])
-            marked[to[edge]] = false;
-    }
-    for (int box = 0; box < boxCount; ++box)
-        graph.offsets[box + 1] +=
-            graph.offsets[box];
-
-    // 第二遍：每次只填当前 box 的连续区间，因此不需要 cursors 副本。
-    graph.adjacent.resize(graph.offsets.back());
-    for (BoxId box = 0; box < boxCount; ++box) {
-        int write = graph.offsets[box];
-        for (int edge = head[box]; edge >= 0;
-             edge = next[edge]) {
-            const BoxId target = to[edge];
-            if (marked[target]) continue;
-            marked[target] = true;
-            graph.adjacent[write++] = target;
-        }
-        for (int edge = head[box]; edge >= 0;
-             edge = next[edge])
-            marked[to[edge]] = false;
-    }
-    return graph;
 }
 
 inline BoxId DistributionSolver::Graph::diameterStart() const {
     auto farthest = [this](BoxId start) {
-        static thread_local std::vector<char> visited;
-        visited.assign(boxCount(), 0);
+        std::vector<char> visited(neighbors.size(), 0);
         BoxId farthestNode = start;
         int farthestDistance = 0;
 
@@ -662,7 +562,7 @@ inline BoxId DistributionSolver::Graph::diameterStart() const {
                 farthestDistance = distance;
                 farthestNode = node;
             }
-            for (const BoxId neighbor : neighbors(node))
+            for (const BoxId neighbor : neighbors[node])
                 if (!visited[neighbor])
                     self(self, neighbor, distance + 1);
         };
@@ -674,8 +574,8 @@ inline BoxId DistributionSolver::Graph::diameterStart() const {
     return farthest(0);
 }
 
-inline void DistributionSolver::Graph::lexBfsOrder(BoxId init, std::vector<BoxId>& order) const {
-    const int n = boxCount();
+inline std::vector<BoxId> DistributionSolver::Graph::lexBfsOrder(BoxId init) const {
+    const int n = static_cast<int>(neighbors.size());
 
     struct Cell {
         std::vector<BoxId> vertices;
@@ -684,34 +584,22 @@ inline void DistributionSolver::Graph::lexBfsOrder(BoxId init, std::vector<BoxId
         bool active = true;
     };
 
-    static thread_local std::vector<Cell> cells;
-    static thread_local std::vector<int> cellOrder;
-    static thread_local std::vector<int> cellOf;
-    static thread_local std::vector<int> position;
-    static thread_local std::vector<int> splitCell;
-    static thread_local std::vector<char> colored;
-    static thread_local std::vector<int> touched;
-    if (cells.empty()) cells.emplace_back();
-    Cell& first = cells[0];
-    first.vertices.clear();
-    first.orderIndex = 0;
-    first.stamp = -1;
-    first.active = true;
-    int cellCount = 1;
-    first.vertices.reserve(n);
-    cellOrder.assign(1, 0);
-    cellOf.assign(n, 0);
-    position.resize(n);
-    splitCell.assign(1, 0);
-    colored.assign(n, false);
-    order.clear();
+    std::vector<Cell> cells(1);
+    cells[0].vertices.reserve(n);
+    cells[0].orderIndex = 0;
+    std::vector<int> cellOrder(1, 0);
+    std::vector<int> cellOf(n, 0);
+    std::vector<int> position(n);
+    std::vector<int> splitCell(1, 0);
+    std::vector<char> colored(n, false);
+    std::vector<BoxId> order;
+    std::vector<int> touched;
     order.reserve(n);
-    touched.clear();
     touched.reserve(n);
 
     for (BoxId v = 0; v < n; ++v) {
-        position[v] = static_cast<int>(first.vertices.size());
-        first.vertices.push_back(v);
+        position[v] = static_cast<int>(cells[0].vertices.size());
+        cells[0].vertices.push_back(v);
     }
 
     auto eraseVertex = [&](int cellId, BoxId v) {
@@ -725,13 +613,8 @@ inline void DistributionSolver::Graph::lexBfsOrder(BoxId init, std::vector<BoxId
 
     auto insertCellBefore = [&](int cellId) {
         const int orderIndex = cells[cellId].orderIndex;
-        const int newCell = cellCount++;
-        if (newCell == static_cast<int>(cells.size())) cells.emplace_back();
-        Cell& cell = cells[newCell];
-        cell.vertices.clear();
-        cell.orderIndex = orderIndex;
-        cell.stamp = -1;
-        cell.active = true;
+        const int newCell = static_cast<int>(cells.size());
+        cells.push_back(Cell{});
         splitCell.push_back(newCell);
         cellOrder.insert(cellOrder.begin() + orderIndex, newCell);
         for (int i = orderIndex; i < static_cast<int>(cellOrder.size()); ++i)
@@ -756,7 +639,7 @@ inline void DistributionSolver::Graph::lexBfsOrder(BoxId init, std::vector<BoxId
         order.push_back(v);
         touched.clear();
 
-        for (const BoxId u : neighbors(v)) {
+        for (const BoxId u : neighbors[v]) {
             if (colored[u]) continue;
 
             const int oldCell = cellOf[u];
@@ -781,51 +664,33 @@ inline void DistributionSolver::Graph::lexBfsOrder(BoxId init, std::vector<BoxId
         if (cells[selectedCell].vertices.empty()) cells[selectedCell].active = false;
     }
 
+    return order;
 }
 
-inline void DistributionSolver::Graph::polishAdjacent(std::vector<BoxId>& order,
-                                                       int rounds) const {
+inline std::vector<BoxId> DistributionSolver::Graph::polishAdjacent(std::vector<BoxId> order,
+                                                                    int rounds) const {
     const int n = static_cast<int>(order.size());
 
     for (int round = 0; round < rounds; ++round) {
-        static thread_local std::vector<int> rem;
-        static thread_local std::vector<int> closingGain;
-        static thread_local std::vector<char> colored;
-        rem.resize(n);
-        closingGain.assign(n, 0);
-        colored.assign(n, false);
+        std::vector<int> rem(n);
+        std::vector<char> colored(n, false);
 
         for (BoxId v = 0; v < n; ++v)
-            rem[v] = static_cast<int>(neighbors(v).size());
+            rem[v] = static_cast<int>(neighbors[v].size());
 
         auto delta = [&](BoxId v) {
-            return static_cast<int>(rem[v] != 0) - closingGain[v];
+            int closed = 0;
+
+            for (const BoxId u : neighbors[v])
+                if (colored[u] && rem[u] == 1) ++closed;
+
+            return static_cast<int>(rem[v] != 0) - closed;
         };
 
         auto color = [&](BoxId v) {
             colored[v] = true;
 
-            // v 若只剩一个未选择邻居，就从此刻起为该邻居贡献一次关闭收益。
-            if (rem[v] == 1)
-                for (const BoxId u : neighbors(v))
-                    if (!colored[u]) {
-                        ++closingGain[u];
-                        break;
-                    }
-
-            // 已选择邻居从 rem=2 变为 rem=1 时，也恰好出现唯一的未选择
-            // 邻居；它从这一刻起贡献关闭收益。每个 box 最多经历一次 2→1，
-            // 因而这些补充扫描总计 O(E)。
-            for (const BoxId u : neighbors(v)) {
-                const int oldRem = rem[u];
-                --rem[u];
-                if (colored[u] && oldRem == 2)
-                    for (const BoxId w : neighbors(u))
-                        if (!colored[w]) {
-                            ++closingGain[w];
-                            break;
-                        }
-            }
+            for (const BoxId u : neighbors[v]) --rem[u];
         };
 
         for (int i = 0; i + 1 < n; ++i) {
@@ -833,7 +698,7 @@ inline void DistributionSolver::Graph::polishAdjacent(std::vector<BoxId>& order,
             const BoxId b = order[i + 1];
 
             const bool bIsAvailableBeforeA =
-                static_cast<int>(neighbors(b).size()) > rem[b];
+                static_cast<int>(neighbors[b].size()) > rem[b];
 
             if (bIsAvailableBeforeA && delta(b) < delta(a))
                 std::swap(order[i], order[i + 1]);
@@ -843,28 +708,26 @@ inline void DistributionSolver::Graph::polishAdjacent(std::vector<BoxId>& order,
 
         color(order.back());
     }
+    return order;
 }
 
-inline void DistributionSolver::Graph::polishAdjacent(BoxId init, std::vector<BoxId>& order) const {
-    lexBfsOrder(init, order);
-    polishAdjacent(order);
+inline std::vector<BoxId> DistributionSolver::Graph::polishAdjacent(BoxId init) const {
+    return polishAdjacent(lexBfsOrder(init));
 }
 
-inline void DistributionSolver::Graph::polishWindow3(std::vector<BoxId>& order) const {
+inline std::vector<BoxId> DistributionSolver::Graph::polishWindow3(std::vector<BoxId> order) const {
     const int n = static_cast<int>(order.size());
 
-    static thread_local std::vector<int> rem;
-    static thread_local std::vector<char> colored;
-    rem.resize(n);
-    colored.assign(n, false);
+    std::vector<int> rem(n);
+    std::vector<char> colored(n, false);
 
     for (BoxId v = 0; v < n; ++v)
-        rem[v] = static_cast<int>(neighbors(v).size());
+        rem[v] = static_cast<int>(neighbors[v].size());
 
     auto delta = [&](BoxId v) {
         int closed = 0;
 
-        for (const BoxId u : neighbors(v))
+        for (const BoxId u : neighbors[v])
             if (colored[u] && rem[u] == 1) ++closed;
 
         return static_cast<int>(rem[v] != 0) - closed;
@@ -873,11 +736,11 @@ inline void DistributionSolver::Graph::polishWindow3(std::vector<BoxId>& order) 
     auto color = [&](BoxId v) {
         colored[v] = true;
 
-        for (const BoxId u : neighbors(v)) --rem[u];
+        for (const BoxId u : neighbors[v]) --rem[u];
     };
 
     auto uncolor = [&](BoxId v) {
-        for (const BoxId u : neighbors(v)) ++rem[u];
+        for (const BoxId u : neighbors[v]) ++rem[u];
 
         colored[v] = false;
     };
@@ -908,7 +771,7 @@ inline void DistributionSolver::Graph::polishWindow3(std::vector<BoxId>& order) 
             for (int j = 0; j < length; ++j) {
                 const BoxId v = candidate[j];
 
-                if (static_cast<int>(neighbors(v).size()) == rem[v]) {
+                if (static_cast<int>(neighbors[v].size()) == rem[v]) {
                     valid = false;
                     break;
                 }
@@ -937,11 +800,11 @@ inline void DistributionSolver::Graph::polishWindow3(std::vector<BoxId>& order) 
             color(best[j]);
         }
     }
+    return order;
 }
 
-inline void DistributionSolver::Graph::polishWindow3(BoxId init, std::vector<BoxId>& order) const {
-    lexBfsOrder(init, order);
-    polishWindow3(order);
+inline std::vector<BoxId> DistributionSolver::Graph::polishWindow3(BoxId init) const {
+    return polishWindow3(lexBfsOrder(init));
 }
 
 
@@ -950,16 +813,36 @@ template <DistributionSolver::PolishKind polish>
 inline const DistributionSolver::Distribution* DistributionSolver::analyze(const Structure::Shape& shape, DistributionSolver::DistPool& pool) {
     if (const Distribution* cached = pool.get(&shape)) return cached;
 
-    Graph graph = Graph::fromShape(shape);
+    Graph graph;
+    graph.neighbors.resize(shape.boxes.size());
+    static thread_local FlatHashTable<U128, char, U128Hash> edgeSet;
+    edgeSet.clear();
+
+        for (const Structure::Shape::Constraint& constraint : shape.constraints) {
+            for (std::size_t i = 0; i < constraint.boxIds.size(); ++i) {
+                const BoxId lhs = constraint.boxIds[i];
+                for (std::size_t j = i + 1; j < constraint.boxIds.size(); ++j) {
+                    const BoxId rhs = constraint.boxIds[j];
+                    const BoxId first = std::min(lhs, rhs);
+                    const BoxId second = std::max(lhs, rhs);
+                    const U128 edgeKey{static_cast<std::uint64_t>(first),
+                                       static_cast<std::uint64_t>(second)};
+                    if (edgeSet.find(edgeKey)) continue;
+                    edgeSet.emplace(edgeKey, 0);
+                    graph.neighbors[lhs].push_back(rhs);
+                    graph.neighbors[rhs].push_back(lhs);
+                }
+            }
+        }
 
     // 抛光默认自带 lexBfsOrder(diameterStart()) 产线；抛光方式由模板参数在
     // 编译期选定。
     const BoxId init = graph.diameterStart();
-    static thread_local std::vector<BoxId> order;
+    std::vector<BoxId> order;
     if constexpr (polish == PolishKind::Adjacent) {
-        graph.polishAdjacent(init, order);
+        order = graph.polishAdjacent(init);
     } else {
-        graph.polishWindow3(init, order);
+        order = graph.polishWindow3(init);
     }
 
     dpHelper helper;

@@ -14,16 +14,30 @@ namespace mss::test {
 // 校验与两种抛光基准成品都只能经它完成。
 struct OrderProbe {
     static DistributionSolver::Graph makeGreedyOrderGraph(const Structure::Shape& shape) {
-        return DistributionSolver::Graph::fromShape(shape);
+        const int n = static_cast<int>(shape.boxes.size());
+        DistributionSolver::Graph graph;
+        graph.neighbors.resize(n);
+        std::vector<std::vector<char>> edge(n, std::vector<char>(n, 0));
+        for (const Structure::Shape::Constraint& constraint : shape.constraints)
+            for (int i = 0; i < static_cast<int>(constraint.boxIds.size()); ++i)
+                for (int j = i + 1; j < static_cast<int>(constraint.boxIds.size()); ++j) {
+                    const BoxId lhs = constraint.boxIds[i];
+                    const BoxId rhs = constraint.boxIds[j];
+                    if (edge[lhs][rhs]) continue;
+                    edge[lhs][rhs] = edge[rhs][lhs] = 1;
+                    graph.neighbors[lhs].push_back(rhs);
+                    graph.neighbors[rhs].push_back(lhs);
+                }
+        return graph;
     }
 
     static int boxCount(const DistributionSolver::Graph& graph) {
-        return graph.boxCount();
+        return static_cast<int>(graph.neighbors.size());
     }
 
     static void printOrderWidthGraph(const DistributionSolver::Graph& graph) {
-        for (BoxId box = 0; box < graph.boxCount(); ++box)
-            for (BoxId neighbor : graph.neighbors(box))
+        for (BoxId box = 0; box < static_cast<int>(graph.neighbors.size()); ++box)
+            for (BoxId neighbor : graph.neighbors[box])
                 if (box < neighbor) std::cout << box << ' ' << neighbor << '\n';
     }
 
@@ -31,13 +45,13 @@ struct OrderProbe {
     // 选择的部分。顺便在线维护并返回该顺序的最大 state width。
     static bool checkOrder(const DistributionSolver::Graph& graph, BoxId init,
                            const std::vector<BoxId>& order, int& maxWidth) {
-        const int n = graph.boxCount();
+        const int n = static_cast<int>(graph.neighbors.size());
         if (static_cast<int>(order.size()) != n || order[0] != init) return false;
 
         std::vector<char> selected(n, 0);
         std::vector<int> unselectedNeighbors(n, 0);
         for (BoxId box = 0; box < n; ++box)
-            unselectedNeighbors[box] = static_cast<int>(graph.neighbors(box).size());
+            unselectedNeighbors[box] = static_cast<int>(graph.neighbors[box].size());
 
         int width = 0;
         maxWidth = 0;
@@ -46,7 +60,7 @@ struct OrderProbe {
             if (box < 0 || box >= n || selected[box]) return false;
             if (step != 0) {
                 bool touchesSelected = false;
-                for (BoxId neighbor : graph.neighbors(box))
+                for (BoxId neighbor : graph.neighbors[box])
                     if (selected[neighbor]) {
                         touchesSelected = true;
                         break;
@@ -54,7 +68,7 @@ struct OrderProbe {
                 if (!touchesSelected) return false;
             }
 
-            for (BoxId neighbor : graph.neighbors(box)) {
+            for (BoxId neighbor : graph.neighbors[box]) {
                 --unselectedNeighbors[neighbor];
                 if (selected[neighbor] && unselectedNeighbors[neighbor] == 0) --width;
             }
@@ -66,14 +80,10 @@ struct OrderProbe {
     }
 
     static std::vector<BoxId> lexBfsPolished(const DistributionSolver::Graph& graph) {
-        std::vector<BoxId> order;
-        graph.polishAdjacent(graph.diameterStart(), order);
-        return order;
+        return graph.polishAdjacent(graph.diameterStart());
     }
     static std::vector<BoxId> lexBfsWindow3(const DistributionSolver::Graph& graph) {
-        std::vector<BoxId> order;
-        graph.polishWindow3(graph.diameterStart(), order);
-        return order;
+        return graph.polishWindow3(graph.diameterStart());
     }
     // 展开起点（= 旧 findDiameter().first，行为不变）。
     static BoxId start(const DistributionSolver::Graph& graph) {

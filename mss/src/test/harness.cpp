@@ -16,7 +16,7 @@ int main() {
 
     mss::test::Rng rng(0xC0FFEE12345ULL);
     const auto start = std::chrono::steady_clock::now();
-    const auto deadline = start + std::chrono::seconds(60);
+    const auto deadline = start + std::chrono::seconds(20);
     long long positions = 0;
     long long games = 0;
     long long components = 0;
@@ -99,10 +99,12 @@ int main() {
                     }
                 }
 
-                const int boxCount = static_cast<int>(instance.boxes.count());
-                if (static_cast<int>(classes.size()) <= boxCount)
-                    classes.resize(boxCount + 1);
-                ClassStats& stats = classes[boxCount];
+                int nodeClass = 0;
+                for (std::uint64_t nodes = old->searchNodes; nodes >= 2; nodes >>= 1)
+                    ++nodeClass;
+                if (static_cast<int>(classes.size()) <= nodeClass)
+                    classes.resize(nodeClass + 1);
+                ClassStats& stats = classes[nodeClass];
                 const long long entryCount =
                     static_cast<long long>(old->entries.size() + graph->entries.size());
                 stats.components++;
@@ -136,10 +138,12 @@ int main() {
               << games << " games, " << components << " components, " << seconds << "s\n"
               << "  old=" << oldSeconds << "s, graph=" << graphSeconds << "s, entries="
               << entries << ", mismatches=" << mismatches << '\n';
-    for (int boxCount = 0; boxCount < static_cast<int>(classes.size()); ++boxCount) {
-        const ClassStats& stats = classes[boxCount];
+    for (int nodeClass = 0; nodeClass < static_cast<int>(classes.size()); ++nodeClass) {
+        const ClassStats& stats = classes[nodeClass];
         if (stats.components == 0) continue;
-        std::cout << "  boxes=" << boxCount << ": components="
+        const std::uint64_t lower = std::uint64_t{1} << nodeClass;
+        const std::uint64_t upper = lower << 1;
+        std::cout << "  nodes=[" << lower << ',' << upper << "): components="
                   << stats.components << ", old=" << stats.oldSeconds << "s, graph="
                   << stats.graphSeconds << "s, entries=" << stats.entries << '\n';
     }
