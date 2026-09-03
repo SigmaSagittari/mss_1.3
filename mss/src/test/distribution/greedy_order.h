@@ -21,12 +21,6 @@ struct OrderProbe {
         return graph.boxCount();
     }
 
-    static void printOrderWidthGraph(const DistributionSolver::Graph& graph) {
-        for (BoxId box = 0; box < graph.boxCount(); ++box)
-            for (BoxId neighbor : graph.neighbors(box))
-                if (box < neighbor) std::cout << box << ' ' << neighbor << '\n';
-    }
-
     // 合法展开顺序：首项为 init；后续每个 box 必须只出现一次，且连接到已经
     // 选择的部分。顺便在线维护并返回该顺序的最大 state width。
     static bool checkOrder(const DistributionSolver::Graph& graph, BoxId init,
@@ -133,84 +127,77 @@ struct OrderStats {
 
 // 只采样真实对局中的 Structure component；两种抛光成品共用同一个 graph、
 // 同一个展开基序（lexBfsOrder）与同一个直径端点 init。
-inline void testDistributionOrders(Rng& rng, const TestConfig& config) {
-    TimeBox timebox(config.seconds);
+inline void testDistributionOrders(const unsigned long long& seed, const TestConfig& config) {
+    Rng rng(seed);
     long long positions = 0;
-    long long games = 0;
     long long components = 0;
     OrderStats lexBfsPolishedStats;
     OrderStats lexBfsWindow3Stats;
     int greatestWidth = -1;
     const char* greatestAlgorithm = nullptr;
     ObservedBoard greatestWidthBoard;
-    while ((config.games < 0 || games < config.games) &&
-           !timebox.expired() && counters().failures == 0) {
-        ++games;
-        generateGame(config, rng, [&](const Snapshot& snapshot) {
-            if (timebox.expired() || counters().failures != 0) return;
-
-            for (const Structure::Instance& instance : snapshot.analysis.structure.components) {
-                const auto graph = OrderProbe::makeGreedyOrderGraph(*instance.shape);
-                const int n = OrderProbe::boxCount(graph);
-                const BoxId init = OrderProbe::start(graph);
-                auto check = [&](const char* name, const std::vector<BoxId>& order, OrderStats& stats,
-                                 int& maxWidth) {
-                    ++counters().checks;
-                    if (!OrderProbe::checkOrder(graph, init, order, maxWidth)) {
-                        ++counters().failures;
-                        std::cerr << "[FAIL] distribution/" << name << ": boxes=" << n
-                                  << "\n  order:";
-                        for (BoxId box : order) std::cerr << ' ' << box;
-                        std::cerr << '\n';
-                        logerr("invalid connected expansion order", snapshot.game.board,
-                               &snapshot.analysis.basic, &snapshot.analysis.structure);
-                        return false;
-                    }
-                    stats.note(maxWidth);
-                    return true;
-                };
-                int maxWidth = 0;
-                const std::vector<BoxId> lexBfsPolishedOrder =
-                    OrderProbe::lexBfsPolished(graph);
-                if (!check("lex-bfs-polished", lexBfsPolishedOrder, lexBfsPolishedStats,
-                           maxWidth)) return;
-                if (maxWidth > greatestWidth) {
-                    greatestWidth = maxWidth;
-                    greatestAlgorithm = "lex-bfs-polished";
-                    greatestWidthBoard = snapshot.game.board;
+    const RunSummary summary = runGames(config, rng, [&](const Snapshot& snapshot) {
+        for (const Structure::Instance& instance : snapshot.analysis.structure.components) {
+            const auto graph = OrderProbe::makeGreedyOrderGraph(*instance.shape);
+            const int n = OrderProbe::boxCount(graph);
+            const BoxId init = OrderProbe::start(graph);
+            auto check = [&](const char* name, const std::vector<BoxId>& order, OrderStats& stats,
+                             int& maxWidth) {
+                ++counters().checks;
+                if (!OrderProbe::checkOrder(graph, init, order, maxWidth)) {
+                    ++counters().failures;
+                    std::cerr << "[FAIL] distribution/" << name << ": boxes=" << n
+                              << "\n  order:";
+                    for (BoxId box : order) std::cerr << ' ' << box;
+                    std::cerr << '\n';
+                    logerr("invalid connected expansion order", snapshot.game.board,
+                           &snapshot.analysis.basic, &snapshot.analysis.structure);
+                    return false;
                 }
-                const std::vector<BoxId> lexBfsWindow3Order =
-                    OrderProbe::lexBfsWindow3(graph);
-                if (!check("lex-bfs-window3", lexBfsWindow3Order, lexBfsWindow3Stats,
-                           maxWidth)) return;
-                if (maxWidth > greatestWidth) {
-                    greatestWidth = maxWidth;
-                    greatestAlgorithm = "lex-bfs-window3";
-                    greatestWidthBoard = snapshot.game.board;
-                }
-
-                ++components;
+                stats.note(maxWidth);
+                return true;
+            };
+            int maxWidth = 0;
+            const std::vector<BoxId> lexBfsPolishedOrder =
+                OrderProbe::lexBfsPolished(graph);
+            if (!check("lex-bfs-polished", lexBfsPolishedOrder, lexBfsPolishedStats,
+                       maxWidth)) return;
+            if (maxWidth > greatestWidth) {
+                greatestWidth = maxWidth;
+                greatestAlgorithm = "lex-bfs-polished";
+                greatestWidthBoard = snapshot.game.board;
             }
-            ++positions;
-            if (positions % 10000 == 0)
-                std::cout << "distribution/order-width-progress: positions=" << positions
-                          << ", lex-bfs-polished-average-width="
-                          << lexBfsPolishedStats.averageMaxWidth()
-                          << ", lex-bfs-polished-average-2="
-                          << lexBfsPolishedStats.averageTwos()
-                          << ", lex-bfs-polished-average-2.5="
-                          << lexBfsPolishedStats.averageWays()
-                          << ", lex-bfs-window3-average-width="
-                          << lexBfsWindow3Stats.averageMaxWidth()
-                          << ", lex-bfs-window3-average-2=" << lexBfsWindow3Stats.averageTwos()
-                          << ", lex-bfs-window3-average-2.5="
-                          << lexBfsWindow3Stats.averageWays()
-                          << "\n" << std::flush;
-        });
-    }
+            const std::vector<BoxId> lexBfsWindow3Order =
+                OrderProbe::lexBfsWindow3(graph);
+            if (!check("lex-bfs-window3", lexBfsWindow3Order, lexBfsWindow3Stats,
+                       maxWidth)) return;
+            if (maxWidth > greatestWidth) {
+                greatestWidth = maxWidth;
+                greatestAlgorithm = "lex-bfs-window3";
+                greatestWidthBoard = snapshot.game.board;
+            }
+
+            ++components;
+        }
+        ++positions;
+        if (positions % 10000 == 0)
+            std::cout << "distribution/order-width-progress: positions=" << positions
+                      << ", lex-bfs-polished-average-width="
+                      << lexBfsPolishedStats.averageMaxWidth()
+                      << ", lex-bfs-polished-average-2="
+                      << lexBfsPolishedStats.averageTwos()
+                      << ", lex-bfs-polished-average-2.5="
+                      << lexBfsPolishedStats.averageWays()
+                      << ", lex-bfs-window3-average-width="
+                      << lexBfsWindow3Stats.averageMaxWidth()
+                      << ", lex-bfs-window3-average-2=" << lexBfsWindow3Stats.averageTwos()
+                      << ", lex-bfs-window3-average-2.5="
+                      << lexBfsWindow3Stats.averageWays()
+                      << "\n" << std::flush;
+    });
     std::cout << "distribution/order-width: " << positions << " positions from "
-              << games << " games, " << components << " components in "
-              << timebox.elapsedSeconds() << "s\n";
+              << summary.games << " games, " << components << " components in "
+              << summary.elapsedSeconds << "s\n";
     lexBfsPolishedStats.print("lex-bfs-polished");
     lexBfsWindow3Stats.print("lex-bfs-window3");
     std::cout << "distribution/max-width-board: algorithm=" << greatestAlgorithm

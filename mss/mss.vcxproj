@@ -160,14 +160,20 @@
     <ClInclude Include="src\core\config.h" />
     <ClInclude Include="src\core\types.h" />
     <ClInclude Include="src\core\utility\flat_hashtable.h" />
-    <ClInclude Include="src\core\utility\bit_flag_set.h" />
     <ClInclude Include="src\core\utility\grid.h" />
     <ClInclude Include="src\core\utility\hash.h" />
     <ClInclude Include="src\core\utility\radix_sort.h" />
     <ClInclude Include="src\core\utility\rng.h" />
+    <ClInclude Include="src\test\common.h" />
+    <ClInclude Include="src\test\distribution\greedy_order.h" />
+    <ClInclude Include="src\test\move_hash.h" />
+    <ClInclude Include="src\test\performance\distribution_real_game.h" />
+    <ClInclude Include="src\test\performance\real_game_probability.h" />
+    <ClInclude Include="src\test\probability\conservation.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\mss_1.2.cpp" />
+    <ClCompile Include="src\test\harness.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

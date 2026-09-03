@@ -181,9 +181,6 @@ struct MidgameSearch {
                       Structure::ShapePool& shapePool, Distribution::DistPool& pool,
                       long long maxEngineCalls);
 
-private:
-
-
 };
 
 // ── 实现区（设计已定稿，代码待填充）──

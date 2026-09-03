@@ -51,9 +51,6 @@
     <ClInclude Include="src\core\utility\flat_hashtable.h">
       <Filter>头文件\core\utility</Filter>
     </ClInclude>
-    <ClInclude Include="src\core\utility\bit_flag_set.h">
-      <Filter>头文件\core\utility</Filter>
-    </ClInclude>
     <ClInclude Include="src\core\utility\rng.h">
       <Filter>头文件\core\utility</Filter>
     </ClInclude>

@@ -15,6 +15,11 @@ namespace mss::test {
 // 前后）的输出必须逐行一致，证明改动"仅语义修改"。哈希覆盖盘面、basic
 // 标记与统计、structure 实例（shape 指纹 + 位置数据）、概率结果、选中招
 // 与是否必须猜——任何一层的行为变化都会反映为哈希变化。
+//
+// 基线用法：任何改动之后，只重新跑这个模块并对比下方基线即可，无需其他
+// 校验。基线配置：seed = 0xC0FFEE12345ULL，30x30 / 225 雷 / 20000 局 /
+// firstMoveSafe = true（即 harness.cpp 的 normal_test）。
+//   基线：move-hash-total: b153b2b60f75dd7c (20000 games, 3198953 moves)
 // ─────────────────────────────────────────────────────────────
 
 // FNV-1a 64 位：按原始字节折叠，long double 也按存储位参与（MSVC 下 80 位
@@ -77,21 +82,17 @@ inline std::uint64_t hashSnapshot(const Snapshot& s) {
 // 每个招法哈希（同 hashSnapshot）按出现顺序继续混入累计值，运行结束只输出
 // 一行 move-hash-total（含局数/招数）。两轮运行（如工作区重构前后）对比这
 // 一个数即可：一致 = 仅语义修改。
-inline void testMoveHashes(Rng& rng, const TestConfig& config) {
-    TimeBox timebox(config.seconds);
-    long long games = 0;
+inline void testMoveHashes(const unsigned long long& seed, const TestConfig& config) {
+    Rng rng(seed);
     long long moves = 0;
     std::uint64_t total = 0xcbf29ce484222325ULL;  // 聚合起点（FNV offset basis）
-    while ((config.games < 0 || games < config.games) && !timebox.expired()) {
-        ++games;
-        generateGame(config, rng, [&](const Snapshot& s) {
-            const std::uint64_t h = hashSnapshot(s);
-            hashPod(total, h);  // 每个招法哈希（8 字节）按序混入总哈希
-            ++moves;
-        });
-    }
+    const RunSummary summary = runGames(config, rng, [&](const Snapshot& s) {
+        const std::uint64_t h = hashSnapshot(s);
+        hashPod(total, h);  // 每个招法哈希（8 字节）按序混入总哈希
+        ++moves;
+    });
     std::cout << "move-hash-total: " << std::hex << total << std::dec << " ("
-              << games << " games, " << moves << " moves)\n";
+              << summary.games << " games, " << moves << " moves)\n";
 }
 
 }  // namespace mss::test

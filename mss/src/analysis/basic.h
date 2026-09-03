@@ -184,8 +184,8 @@ inline Basic::Result Basic::analyze(const ObservedBoard& state) {
                 int mineCount = 0, candidateCount = 0;
                 forEachAdjacent(i, j, n, m, [&](int nx, int ny) {
                     if (result.marks[nx][ny] == Mark::Mine) mineCount++;
-                    if (board[nx][ny] == Cell::Hidden && result.marks[nx][ny] != Mark::Safe)
-                        if (result.marks[nx][ny] != Mark::Mine) candidateCount++;
+                    else if (board[nx][ny] == Cell::Hidden && result.marks[nx][ny] != Mark::Safe)
+                        candidateCount++;
                 });
                 const int v = numberValue(board[i][j]);
                 if (v < mineCount || v > mineCount + candidateCount) {

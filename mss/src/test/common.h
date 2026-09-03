@@ -1,5 +1,32 @@
 #pragma once
 
+// ═════════════════════════════════════════════════════════════════════
+// test/ 架构规范 —— 改动或新增 test 代码之前必读（含 AI）。
+//
+// 1. 模块形态：每个测试模块 = 一个
+//    inline void testXxx(const unsigned long long& seed, const TestConfig&)，
+//    零其他对外符号（探针等私有辅助除外）；harness.cpp 按声明顺序调用。
+//    seed 在 harness.cpp 中声明、永久不变；模块内部各自 Rng rng(seed) 起流
+//    （各模块独立流 ⇒ 输出不依赖启用矩阵，单模块与全量运行结果一致）。
+// 2. 启用方式：harness.cpp 的 main 里用注释开关控制，一行一个模块；
+//    禁止发明命令行参数 / 模块表 / 动态注册等替代机制（人手注释最可靠）。
+// 3. 配置纪律：TestConfig 不留默认值，全部字段在 harness.cpp 显式写出；
+//    seconds / games 二选一驱动，另一个为 -1；双 -1 由 runGames 拒绝。
+// 4. 统一驱动：真实对局测试一律经 runGames()（时间盒 + 局数二选一、
+//    失败即停、每局面回调一次 Snapshot）。禁止复制 while 循环。
+//    例外（决策器或分析路径与 generateGame 不同，如只测分布层吞吐）必须
+//    自建循环并在文件头写明理由。
+// 5. 输出纪律：每模块结束时输出一行汇总，前缀 = 模块路径名
+//    （performance/…、basic/…），内容自定但须含位置数/局数与耗时；
+//    专项指纹（move-hash）可例外，须注明。
+// 6. 失败语义：断言一律 MSS_TEST_CHECK（计入 counters()），失败即打印
+//    [FAIL] 并返回；runGames 见 counters().failures 即整体停止。
+// 7. 随机源：一律 mss::test::Rng，由入参 seed 在模块内部构造（Rng rng(seed)）；
+//    禁止引入其他随机源，禁止模块间共享随机流（跨模块共享 = 输出依赖启用顺序）。
+// 8. 共享纪律：Game / Analysis / Snapshot / TimeBox / runGames 等一律复用
+//    本文件；禁止复制实现（历史上复制粘贴是 harness 不可读的根源）。
+// ═════════════════════════════════════════════════════════════════════
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -33,40 +60,6 @@ struct Rng {
 
 struct Counters { long long checks = 0; long long failures = 0; };
 inline Counters& counters() { static Counters value; return value; }
-
-// 收集观测到的雷概率极值，便于复现/定位浮点边界问题。
-struct ProbabilityExtremes {
-    long double minPositive = 1.0L;
-    long double maxBelowOne = 0.0L;
-    long double minObserved = 1.0L;
-    long double maxObserved = 0.0L;
-    long double maxBelowOneMinus1e10 = 0.0L;
-    long long positiveSamples = 0;
-    void note(long double p) {
-        minObserved = std::min(minObserved, p);
-        maxObserved = std::max(maxObserved, p);
-        if (p < 1.0L - 1e-10L) maxBelowOneMinus1e10 = std::max(maxBelowOneMinus1e10, p);
-        if (p > 0.0L && p < 1.0L) {
-            minPositive = std::min(minPositive, p);
-            maxBelowOne = std::max(maxBelowOne, p);
-            ++positiveSamples;
-        }
-    }
-};
-inline ProbabilityExtremes& probabilityExtremes() { static ProbabilityExtremes value; return value; }
-
-inline void printProbabilityExtremes() {
-    const ProbabilityExtremes& e = probabilityExtremes();
-    if (e.positiveSamples == 0) {
-        std::cout << "probability extremes: no strictly interior probabilities\n";
-        return;
-    }
-    std::cout << "probability extremes: min positive=" << std::hexfloat << e.minPositive
-              << ", max below one=" << e.maxBelowOne << ", observed=[" << e.minObserved
-              << ", " << e.maxObserved << "], max p < 1-1e-10="
-              << e.maxBelowOneMinus1e10 << std::defaultfloat << " ("
-              << e.positiveSamples << " interior samples)\n";
-}
 
 inline void logerr(std::string_view message) {
     std::cerr << "\n[FAIL] " << message << '\n';
@@ -132,7 +125,7 @@ struct TimeBox {
 // 所有真实对局测试共用的采样配置。**不留默认值**：harness main 必须显式写出
 // 全部字段（方便手动改参数）。驱动量二选一：
 //   seconds >= 0 → 时间盒驱动；games >= 0 → 局数驱动；
-//   其中一个为 -1 表示由另一个控制；两者都为 -1 是配置错误（main 里 logerr 拒绝）。
+//   其中一个为 -1 表示由另一个控制；两者都为 -1 是配置错误（runGames 拒绝）。
 struct TestConfig {
     int rows;
     int cols;
@@ -299,6 +292,38 @@ inline void generateGame(const TestConfig& config, Rng& rng, Fn&& consume) {
     }
     std::cerr << "could not generate a winning game after " << config.maxRestarts << " restarts\n";
     std::abort();
+}
+
+// ── 统一对局驱动（规范 R4）──
+// 真实对局测试一律经 runGames() 生成对局并消费 Snapshot；禁止各自复制
+// while 循环（曾出现五份复制、时间盒/失败检查条件各不相同的乱象）。
+// 规则：
+//   - 驱动量按 TestConfig：seconds / games 二选一（另一个 -1）；双 -1 拒绝；
+//   - 时间盒到期或有断言失败（counters().failures）立即停止；
+//   - perSnapshot 只做本模块的统计与断言，不再自行检查时间盒/失败。
+struct RunSummary {
+    long long games = 0;        // 已完成局数
+    double elapsedSeconds = 0;  // 驱动实际耗时（时间盒到期或达到局数时）
+};
+
+template <typename Fn>
+inline RunSummary runGames(const TestConfig& config, Rng& rng, Fn&& perSnapshot) {
+    if (config.seconds < 0 && config.games < 0) {
+        logerr("TestConfig: seconds 与 games 同为 -1，必须二选一指定驱动量");
+        std::abort();
+    }
+    TimeBox timebox(config.seconds);
+    RunSummary summary;
+    while ((config.games < 0 || summary.games < config.games) &&
+           !timebox.expired() && counters().failures == 0) {
+        ++summary.games;
+        generateGame(config, rng, [&](const Snapshot& snapshot) {
+            if (timebox.expired() || counters().failures != 0) return;
+            perSnapshot(snapshot);
+        });
+    }
+    summary.elapsedSeconds = timebox.elapsedSeconds();
+    return summary;
 }
 
 }  // namespace mss::test

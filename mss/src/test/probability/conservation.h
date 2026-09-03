@@ -1,0 +1,64 @@
+// probability/conservation.h — 概率引擎守恒与精确性校验（testProbabilityConservation）：
+// 每个隐藏格断言：p ∈ [0,1]；逻辑 Safe/Mine 的格概率必须精确 0/1；
+// 概率恰为 0/1 的格必须与真实雷位一致；全盘 Σp == 总雷数（守恒，1e-9 内）。
+// 曾用名 testProbabilitySpread（"spread" 与所测内容无关，已正名）。
+#pragma once
+
+#include "test/common.h"
+
+namespace mss::test {
+
+inline void testProbabilityConservation(const unsigned long long& seed, const TestConfig& config) {
+    Rng rng(seed);
+    long long positions = 0;
+    const RunSummary summary = runGames(config, rng, [&](const Snapshot& s) {
+        const auto& board = s.game.board;
+        const auto& basic = s.analysis.basic;
+        const auto& structure = s.analysis.structure;
+        const auto& probability = s.analysis.probability;
+        MSS_TEST_CHECK(probability.candidates > 0.0L, "exact analysis has no candidates", board, &basic, &structure);
+        long double expectedMines = 0.0L;
+        for (int x = 1; x <= board.rows; ++x) for (int y = 1; y <= board.cols; ++y) {
+            if (board.board[x][y] != Cell::Hidden) continue;
+            const CellId cell = board.id(x, y);
+            const CellLocation loc = structure.cellLoc[cell];
+            const long double raw = loc.component == -1
+                ? (basic.marks[x][y] == Basic::Mark::Mine ? 1.0L
+                   : basic.marks[x][y] == Basic::Mark::Unknown ? probability.tCellProbability : 0.0L)
+                : loc.box == -1 ? 0.0L
+                : probability.components[loc.component].boxProbs[
+                    loc.box];
+            const long double p = probability.mineProbability(cell, board, basic, structure);
+            if (!(p >= 0.0L && p <= 1.0L)) {
+                ++counters().checks;
+                ++counters().failures;
+                std::cerr << "probability at (" << x << ',' << y << ") = "
+                          << std::hexfloat << p << std::defaultfloat << '\n';
+                logerr("mine probability is outside [0, 1]", board, &basic, &structure);
+                return;
+            }
+            ++counters().checks;
+            if (basic.marks[x][y] == Basic::Mark::Safe)
+                MSS_TEST_CHECK(p == 0.0L, "logically safe cell is not exactly probability zero",
+                               board, &basic, &structure);
+            if (basic.marks[x][y] == Basic::Mark::Mine)
+                MSS_TEST_CHECK(p == 1.0L, "logically mined cell is not exactly probability one",
+                               board, &basic, &structure);
+            if (p == 0.0L)
+                MSS_TEST_CHECK(!s.game.mine(x, y), "probability-zero cell is a real mine",
+                               board, &basic, &structure);
+            if (p == 1.0L)
+                MSS_TEST_CHECK(s.game.mine(x, y), "probability-one cell is actually safe",
+                               board, &basic, &structure);
+            expectedMines += raw;
+        }
+        MSS_TEST_CHECK(std::fabs(expectedMines - static_cast<long double>(board.totalMines)) < 1e-9L,
+            "mine-probability sum differs from total mine count", board, &basic, &structure);
+        MSS_TEST_CHECK(s.next.x != 0, "unfinished board has no selectable hidden cell", board, &basic, &structure);
+        ++positions;
+    });
+    std::cout << "probability/conservation: " << positions << " positions from "
+              << summary.games << " games in " << summary.elapsedSeconds << "s\n";
+}
+
+}  // namespace mss::test

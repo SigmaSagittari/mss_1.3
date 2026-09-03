@@ -15,7 +15,12 @@ namespace mss::test {
 // 真实对局中的分布层性能测试（统一时间盒驱动）：揭示推进走 Basic::update +
 // Structure::update（buildComponent 所在的增量路径），每个局面遍历全部组件
 // 跑分布分析。config.distributionMode 决定用旧 Solver 还是图算法实现。
-inline void testDistributionRealGame(Rng& rng, const TestConfig& config) {
+//
+// 为什么不用 runGames（common.h 规范 R4 的例外）：本模块只测分布层吞吐，
+// 决策器是"第一个非雷隐藏格"（不跑 Exact 概率），与 generateGame 的
+// lowestRiskMove 路径不同，对局循环只能自建。
+inline void testDistributionRealGame(const unsigned long long& seed, const TestConfig& config) {
+    Rng rng(seed);
     const bool useOld = config.distributionMode == DistributionMode::Old;
 
     TimeBox timebox(config.seconds);

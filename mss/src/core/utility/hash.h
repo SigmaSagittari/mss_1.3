@@ -15,10 +15,6 @@ struct U128 {
 
     bool operator==(const U128& o) const { return lo == o.lo && hi == o.hi; }
     bool operator!=(const U128& o) const { return !(*this == o); }
-    // hi 为主序的字典序：与 radix_sort.h 的字节处理顺序保持一致
-    bool operator<(const U128& o) const {
-        return hi != o.hi ? hi < o.hi : lo < o.lo;
-    }
 
     // 分量相加：用于几何分组时把各数字格种子累加到邻格
     U128& operator+=(const U128& o) {

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <memory>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -41,7 +42,6 @@ struct Distribution {
     };
 
     std::vector<Entry> entries;
-    std::uint64_t searchNodes = 0;  // 旧 DFS 的递归节点数（性能分类用）
 
     // ── 池 ──
 
@@ -68,8 +68,7 @@ struct Distribution {
         //   assignment 按 BoxId 索引（各单位格雷数），只读、不可持引用；
         //   ways = 该分配的组合数 ∏ C(boxSize, k)。
         template <typename OnAssignment>
-        static void forEachAssignment(const Structure::Shape& shape, OnAssignment&& onAssignment,
-                                      std::uint64_t* searchNodes = nullptr);
+        static void forEachAssignment(const Structure::Shape& shape, OnAssignment&& onAssignment);
 
         // 汇总分布表（forEachAssignment 聚合），经 DistPool 去重缓存。
         static const Distribution* analyze(const Structure::Shape& shape, DistPool& pool);
@@ -135,8 +134,7 @@ inline long double Distribution::Solver::binom(int n, int k) {
 
 template <typename OnAssignment>
 inline void Distribution::Solver::forEachAssignment(const Structure::Shape& shape,
-                                                    OnAssignment&& onAssignment,
-                                                    std::uint64_t* searchNodes) {
+                                                    OnAssignment&& onAssignment) {
     const int n = static_cast<int>(shape.boxes.size());
     const int nc = static_cast<int>(shape.constraintCount());
 
@@ -164,7 +162,6 @@ inline void Distribution::Solver::forEachAssignment(const Structure::Shape& shap
     //   curSum[c] + k + rem < sum[c]    → 剩余 box 全摆满也凑不够，剪
     //   （rem = 约束 c 未赋 box 的 size 之和）
     auto dfs = [&](auto&& self, int idx, long double curWays) -> void {
-        if (searchNodes) ++*searchNodes;
         if (idx == n) {
             onAssignment(distributionWs.assignment, curWays);
             return;
@@ -220,7 +217,7 @@ inline const Distribution* Distribution::Solver::analyze(const Structure::Shape&
         const std::size_t row = total * n;
         for (int i = 0; i < n; ++i)
             distributionWs.expectFlat[row + i] += ways * assignment[i];
-    }, &dist.searchNodes);
+    });
 
     for (int total = 0; total <= maxTotal; ++total) {
         if (distributionWs.wayTable[total] == 0) continue;
@@ -259,7 +256,7 @@ inline void Distribution::Solver::all_distribute(const ObservedBoard& board,
     placed.reserve(board.totalMines);
 
     // 从 positions[start..] 里选 need 个位置，选中时压入 placed，选完调 on_complete。
-    auto choose = [&](auto&& self, const std::vector<CellId>& positions, int start, int need,
+    auto choose = [&](auto&& self, std::span<const CellId> positions, int start, int need,
                       auto&& on_complete) -> void {
         if (need == 0) {
             on_complete();
@@ -273,18 +270,13 @@ inline void Distribution::Solver::all_distribute(const ObservedBoard& board,
         }
     };
 
-    // 组件索引。
-    std::vector<ComponentId> comps;
-    for (ComponentId cid = 0; cid < static_cast<ComponentId>(structure.components.size()); ++cid)
-        comps.push_back(cid);
-
-    const int compCount = static_cast<int>(comps.size());
+    const int compCount = static_cast<int>(structure.components.size());
 
     // 后缀最大雷数，用于剪枝：当前已用 + 后面所有连通块全摆满仍不够剩余雷数时提前返回。
     std::vector<int> suffixMax(compCount + 1, 0);
     for (int ci = compCount - 1; ci >= 0; --ci) {
         const Structure::Instance& inst =
-            structure.components[comps[ci]];
+            structure.components[ci];
         int mx = 0;
         for (std::size_t b = 0; b < inst.boxes.count(); ++b)
             mx += static_cast<int>(inst.boxes.cellCount(b));
@@ -297,7 +289,7 @@ inline void Distribution::Solver::all_distribute(const ObservedBoard& board,
         compCount);
     for (int ci = 0; ci < compCount; ++ci) {
         const Structure::Instance& inst =
-            structure.components[comps[ci]];
+            structure.components[ci];
         forEachAssignment(*inst.shape, [&](const std::vector<char>& assignment, long double) {
             deepCache[ci].push_back(assignment);
         });
@@ -322,7 +314,7 @@ inline void Distribution::Solver::all_distribute(const ObservedBoard& board,
             return;
 
         const Structure::Instance& inst =
-            structure.components[comps[ci]];
+            structure.components[ci];
         const int n = static_cast<int>(inst.boxes.count());
         const auto& deep = deepCache[ci];
 
@@ -334,14 +326,11 @@ inline void Distribution::Solver::all_distribute(const ObservedBoard& board,
                     self(self, ci + 1, used + compMines);
                     return;
                 }
-                // 取第 boxi 个 box 的格子区间。
-                std::vector<CellId> boxCells;
-                boxCells.reserve(inst.boxes.cellCount(boxi));
-                for (std::size_t k = inst.boxes.boxOf[boxi];
-                     k < inst.boxes.boxOf[boxi + 1]; ++k)
-                    boxCells.push_back(inst.boxes.cells[k]);
-                choose(choose, boxCells, 0, assignment[boxi],
-                       [&] { selfBox(selfBox, boxi + 1); });
+                // 取第 boxi 个 box 的格子区间（span 视图，零拷贝：choose 只读不持有）。
+                choose(choose,
+                       std::span<const CellId>(inst.boxes.cells.data() + inst.boxes.boxOf[boxi],
+                                               inst.boxes.cellCount(boxi)),
+                       0, assignment[boxi], [&] { selfBox(selfBox, boxi + 1); });
             };
             dfsBox(dfsBox, 0);
         }
