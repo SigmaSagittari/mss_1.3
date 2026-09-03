@@ -1,147 +1,38 @@
-#include <chrono>
+// test/harness.cpp — 全模块驱动：统一配置（含统一时间盒 seconds）与统一
+// 接口（inline void testXxx(Rng&, const TestConfig&)），逐模块顺序执行。
+// 各模块输出自身的吞吐/统计行；main 只负责汇总失败并给出退出码。
+#include <iostream>
 
 #include "test/common.h"
 #include "test/basic/flood_probability.h"
 #include "test/distribution/greedy_order.h"
+#include "test/performance/distribution_real_game.h"
 #include "test/performance/real_game_probability.h"
 #include "test/spread/probability.h"
 
 int main() {
     using namespace mss;
     using namespace mss::test;
-    constexpr TestConfig normal_test{
+
+    TestConfig normal_test{
         .rows = 30, .cols = 30, .mines = 225,
-        .firstMoveSafe = true,
+        .distributionMode = DistributionMode::Graph,
+		.firstMoveSafe = true,
     };
 
-    mss::test::Rng rng(0xC0FFEE12345ULL);
-    const auto start = std::chrono::steady_clock::now();
-    const auto deadline = start + std::chrono::seconds(60);
-    long long positions = 0;
-    long long games = 0;
-    long long components = 0;
-    long long entries = 0;
-    long long mismatches = 0;  // old vs graph 分布表不一致的组件数
-    double oldSeconds = 0.0;
-    double graphSeconds = 0.0;
-    struct ClassStats {
-        long long components = 0;
-        long long entries = 0;
-        double oldSeconds = 0.0;
-        double graphSeconds = 0.0;
-    };
-    std::vector<ClassStats> classes;
-    while (std::chrono::steady_clock::now() < deadline) {
-        ++games;
-        Game game(normal_test);
-        game.placeMines(rng, normal_test.firstMoveSafe);
-        Basic::Delta firstMove;
-        game.reveal(1, 1, firstMove);
-        Basic::Result basic = Basic::analyze(game.board);
-        Structure::ShapePool shapes;
-        Structure::Result structure = Structure::analyze(game.board, basic, shapes);
-        Distribution::DistPool oldPool;
-        DistributionSolver::DistPool graphPool;
+    mss::test::Rng rng(0xC0FFEE12345ULL);  // 全限定：与 core 的 mss::Rng 区分
 
-        while (!game.won() && std::chrono::steady_clock::now() < deadline) {
-            for (const Structure::Instance& instance : structure.components) {
-                const auto oldStart = std::chrono::steady_clock::now();
-                const Distribution* old = Distribution::Solver::analyze(*instance.shape, oldPool);
-                const double oldElapsed = std::chrono::duration<double>(
-                    std::chrono::steady_clock::now() - oldStart).count();
-                oldSeconds += oldElapsed;
+    //testBasicFloodProbability(rng, normal_test);
+    //testProbabilitySpread(rng, normal_test);
+    //testDistributionOrders(rng, normal_test);
+    //testDistributionRealGame(rng, normal_test);
+    testRealGameProbabilityPerformance(rng, normal_test);
 
-                const auto graphStart = std::chrono::steady_clock::now();
-                const DistributionSolver::Distribution* graph =
-                    DistributionSolver::analyze(*instance.shape, graphPool);
-                const double graphElapsed = std::chrono::duration<double>(
-                    std::chrono::steady_clock::now() - graphStart).count();
-                graphSeconds += graphElapsed;
-
-                // 一致性校验：old 与 graph 的分布表逐条目比对，容忍 1e-10 相对误差
-                // （长双精度下算法改写的回归安全网；只统计，打日志限量防刷屏）。
-                {
-                    auto closeEnough = [](long double a, long double b) {
-                        const long double scale =
-                            std::max({1.0L, std::fabs(a), std::fabs(b)});
-                        return std::fabs(a - b) <= 1e-10L * scale;
-                    };
-                    bool ok = old->entries.size() == graph->entries.size();
-                    if (ok) {
-                        for (std::size_t i = 0; i < old->entries.size() && ok; ++i) {
-                            const auto& o = old->entries[i];
-                            const auto& g = graph->entries[i];
-                            if (o.mineCount != g.mineCount ||
-                                !closeEnough(o.ways, g.ways) ||
-                                o.perBoxExpectation.size() != g.perBoxExpectation.size()) {
-                                ok = false;
-                                break;
-                            }
-                            for (std::size_t b = 0; b < o.perBoxExpectation.size(); ++b)
-                                if (!closeEnough(o.perBoxExpectation[b],
-                                                 g.perBoxExpectation[b])) {
-                                    ok = false;
-                                    break;
-                                }
-                        }
-                    }
-                    if (!ok) {
-                        ++mismatches;
-                        if (mismatches <= 5) {
-                            std::cerr << "[MISMATCH] component boxes="
-                                      << instance.boxes.count()
-                                      << " constraints="
-                                      << instance.shape->constraints.size()
-                                      << " oldEntries=" << old->entries.size()
-                                      << " graphEntries=" << graph->entries.size()
-                                      << " oldNodes=" << old->searchNodes << '\n';
-                        }
-                    }
-                }
-
-                const int boxCount = static_cast<int>(instance.boxes.count());
-                if (static_cast<int>(classes.size()) <= boxCount)
-                    classes.resize(boxCount + 1);
-                ClassStats& stats = classes[boxCount];
-                const long long entryCount =
-                    static_cast<long long>(old->entries.size() + graph->entries.size());
-                stats.components++;
-                stats.entries += entryCount;
-                stats.oldSeconds += oldElapsed;
-                stats.graphSeconds += graphElapsed;
-                entries += entryCount;
-                ++components;
-            }
-            ++positions;
-
-            int nextX = 0;
-            int nextY = 0;
-            for (int x = 1; x <= game.board.rows && nextX == 0; ++x)
-                for (int y = 1; y <= game.board.cols; ++y)
-                    if (game.board.board[x][y] == Cell::Hidden && !game.mine(x, y)) {
-                        nextX = x;
-                        nextY = y;
-                        break;
-                    }
-
-            Basic::Delta updates;
-            game.reveal(nextX, nextY, updates);
-            Basic::update(game.board, basic, updates);
-            Structure::update(game.board, basic, structure, shapes, updates);
-        }
+    const long long failures = counters().failures;
+    if (failures == 0) {
+        std::cout << "harness: all checks passed\n";
+    } else {
+        std::cout << "harness: " << failures << " failures\n";
     }
-    const double seconds = std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - start).count();
-    std::cout << "performance/distribution-real-game: " << positions << " positions from "
-              << games << " games, " << components << " components, " << seconds << "s\n"
-              << "  old=" << oldSeconds << "s, graph=" << graphSeconds << "s, entries="
-              << entries << ", mismatches=" << mismatches << '\n';
-    for (int boxCount = 0; boxCount < static_cast<int>(classes.size()); ++boxCount) {
-        const ClassStats& stats = classes[boxCount];
-        if (stats.components == 0) continue;
-        std::cout << "  boxes=" << boxCount << ": components="
-                  << stats.components << ", old=" << stats.oldSeconds << "s, graph="
-                  << stats.graphSeconds << "s, entries=" << stats.entries << '\n';
-    }
-    return 0;
+    return failures == 0 ? 0 : 1;
 }

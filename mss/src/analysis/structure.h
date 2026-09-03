@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -42,16 +43,42 @@ struct Structure {
             int size = 0;
         };
 
-        // 约束：一个数字格，要求其邻接单位格的雷数总和等于 sum。
-        // boxIds 是 shape 内局部下标（0..boxes.size()-1）。
-        struct Constraint {
+        // 约束视图：一个数字格约束 = 要求的雷数总和 + 邻接单位格集合。
+        // boxIds 是 shape 内局部下标（0..boxes.size()-1）；span 引用 Shape
+        // 内部的平铺存储。interned 不可变 ⇒ Shape 存活期内地址冻结，视图
+        // 安全；查询接口不暴露 offset/count 等布局细节。
+        struct ConstraintView {
             int sum = 0;
-            std::vector<BoxId> boxIds;
+            std::span<const BoxId> boxIds;
         };
 
-        std::vector<Box> boxes;
-        std::vector<Constraint> constraints;
-        U128 hash = {};  // 内容指纹（ShapePool 去重依据）
+        std::vector<Box> boxes;  // 无内部布局的 POD 值数组，公开直读
+        U128 hash = {};          // 内容指纹（ShapePool 去重依据）
+
+        // ── 约束查询接口 ──
+        // 约束数据（sum + 邻盒集合）只经查询访问；平铺存储与 offset/count
+        // 是内部布局细节，不对外。
+        std::size_t constraintCount() const { return constraints_.size(); }
+        ConstraintView constraint(std::size_t i) const {
+            const Constraint& c = constraints_[i];
+            if (c.count == 0) return {};
+            return {c.sum,
+                    std::span<const BoxId>(boxIds_.data() + c.offset, c.count)};
+        }
+
+    private:
+        friend struct Structure;  // 构建与哈希只在 structure.h 内部进行
+
+        // 布局细节：所有约束的邻盒 id 平铺在 boxIds_（按约束顺序拼接），
+        // constraints_ 用 offset/count 定位区间（与 Instance::Boxes 的
+        // boxOf 前缀和同构：单块连续存储，无逐约束小分配）。
+        struct Constraint {
+            int sum = 0;
+            std::uint32_t offset = 0;
+            std::uint8_t count = 0;
+        };
+        std::vector<Constraint> constraints_;
+        std::vector<BoxId> boxIds_;
     };
 
     // 每盘面的连通块实例：引用 interned shape + 本盘面位置数据。
@@ -73,7 +100,7 @@ struct Structure {
 
         const Shape* shape = nullptr;  // interned 形状（观察指针，池只增不删不悬垂）
         Boxes boxes;                   // 本盘面单位格的格子
-        // 约束数字格，顺序与 shape.constraints 一致。
+        // 约束数字格，顺序与 shape.constraint(i) 的视图一一对应。
         std::vector<CellId> constraintCells;
     };
 
@@ -130,7 +157,8 @@ struct Structure {
     // ── 实现区 ──
 
 private:
-    // 收集一个连通块的所有格子（数字格 + 前沿格）。
+    // 收集一个连通块的所有格子（数字格 + 前沿格）。无递归：入队即标 vis，
+    // cells 兼作 BFS 工作队列，零额外分配，无调用栈深度风险。
     static void collectComponent(int x, int y, const ObservedBoard& state,
                                  const Basic::Result& basic, Grid<char>& vis,
                                  std::vector<std::pair<int, int>>& cells);
@@ -221,24 +249,33 @@ inline void Structure::collectComponent(int x, int y, const ObservedBoard& state
                                         const Basic::Result& basic, Grid<char>& vis,
                                         std::vector<std::pair<int, int>>& cells) {
     using Mark = Basic::Mark;
-    // 双向扩散：数字格 → Frontier 邻格，Frontier 格 → 数字邻格。
-    auto dfs = [&](auto&& self, int cx, int cy) -> void {
-        if (vis[cx][cy]) return;
-        vis[cx][cy] = 1;
-        cells.emplace_back(cx, cy);
-
+    // 无递归 BFS：cells 兼作工作队列（调用方已 clear，新鲜传入）。入队即标
+    // vis，每个格子恰好入队一次；游标 i 扫描全队列后连通块即收集完毕。
+    // 遍历顺序（BFS 替换 DFS）不影响结果：buildComponent 对格子顺序不敏感
+    // （box 桶 / 约束集都按集合构造），同一种子格 + 固定邻域枚举序 ⇒
+    // 每块输出确定。
+    vis[x][y] = 1;
+    cells.emplace_back(x, y);
+    for (std::size_t i = 0; i < cells.size(); ++i) {
+        const auto [cx, cy] = cells[i];
+        // 双向扩散：数字格 → Frontier 邻格，Frontier 格 → 数字邻格。
         if (isNumber(state.board[cx][cy])) {
             forEachAdjacent(cx, cy, state.rows, state.cols, [&](int nx, int ny) {
-                if (basic.marks[nx][ny] == Mark::Frontier) self(self, nx, ny);
+                if (basic.marks[nx][ny] == Mark::Frontier && !vis[nx][ny]) {
+                    vis[nx][ny] = 1;
+                    cells.emplace_back(nx, ny);
+                }
             });
         }
         if (basic.marks[cx][cy] == Mark::Frontier) {
             forEachAdjacent(cx, cy, state.rows, state.cols, [&](int nx, int ny) {
-                if (isNumber(state.board[nx][ny])) self(self, nx, ny);
+                if (isNumber(state.board[nx][ny]) && !vis[nx][ny]) {
+                    vis[nx][ny] = 1;
+                    cells.emplace_back(nx, ny);
+                }
             });
         }
-    };
-    dfs(dfs, x, y);
+    }
 }
 
 inline Structure::Instance Structure::buildComponent(
@@ -255,6 +292,7 @@ inline Structure::Instance Structure::buildComponent(
     static thread_local std::vector<BoxId> tlBoxOfCells;
     static thread_local std::vector<std::vector<CellId>> tlBuckets;
     static thread_local std::vector<char> tlBoxUsed;
+    static thread_local std::vector<BoxId> tlAllBoxIds;  // 邻盒 id 平铺收集桶
     tlHashBox.clear();  // 保留容量，只清占位
 
     // 1. 收集单位格：哈希相同 = 同一单位格（哈希表替代 sort+unique+lower_bound，O(C) 均摊）。
@@ -294,26 +332,37 @@ inline Structure::Instance Structure::buildComponent(
         inst.boxes.boxOf.push_back(static_cast<std::uint16_t>(inst.boxes.cells.size()));
     }
 
-    // 3. 数字格 → 约束。
+    // 3. 数字格 → 约束：邻盒集合单遍平铺收集进 thread_local 缓冲，同时记
+    //    sum/offset/count；块结束时整体拷贝进 shape 的平铺存储（一次 memcpy
+    //    级搬移，无逐约束小分配）。去重用 tlBoxUsed 与旧逻辑一致。
     tlBoxUsed.assign(shape.boxes.size(), 0);
-    for (auto [x, y] : cells) {
+    tlAllBoxIds.clear();
+    for (const std::pair<int, int>& cell : cells) {
+        const int x = cell.first;
+        const int y = cell.second;
         if (!isNumber(state.board[x][y])) continue;
-        Shape::Constraint c;
-        c.sum = numberValue(state.board[x][y]);
+        int sum = numberValue(state.board[x][y]);
+        const std::uint32_t start =
+            static_cast<std::uint32_t>(tlAllBoxIds.size());
         forEachAdjacent(x, y, rows, cols, [&](int nx, int ny) {
-            if (basic.marks[nx][ny] == Mark::Mine) c.sum--;
+            if (basic.marks[nx][ny] == Mark::Mine) --sum;
             if (basic.marks[nx][ny] == Mark::Frontier) {
                 const BoxId boxId = static_cast<BoxId>(cellHash[nx][ny].lo);
                 if (!tlBoxUsed[boxId]) {
                     tlBoxUsed[boxId] = 1;
-                    c.boxIds.push_back(boxId);
+                    tlAllBoxIds.push_back(boxId);
                 }
             }
         });
-        for (BoxId id : c.boxIds) tlBoxUsed[id] = 0;
-        shape.constraints.push_back(std::move(c));
+        for (std::size_t k = start; k < tlAllBoxIds.size(); ++k)
+            tlBoxUsed[tlAllBoxIds[k]] = 0;
+        shape.constraints_.push_back(Shape::Constraint{
+            sum, start,
+            static_cast<std::uint8_t>(tlAllBoxIds.size() - start)});
         inst.constraintCells.push_back(state.id(x, y));
     }
+    shape.boxIds_.insert(shape.boxIds_.end(), tlAllBoxIds.begin(),
+                         tlAllBoxIds.end());
 
     // 4. intern 形状。
     inst.shape = pool.intern(std::move(shape));
@@ -322,12 +371,14 @@ inline Structure::Instance Structure::buildComponent(
 
 inline U128 Structure::computeHash(const Shape& shape) {
     U128Hasher h;
-    for (const auto& box : shape.boxes)
+    for (const Shape::Box& box : shape.boxes)
         h.mix(static_cast<std::uint64_t>(box.size));
-    for (const auto& limit : shape.constraints) {
-        h.mix(static_cast<std::uint64_t>(limit.sum));
-        for (BoxId id : limit.boxIds)
-            h.mix(static_cast<std::uint64_t>(id) + 0x9e3779b9ULL);
+    for (std::size_t i = 0; i < shape.constraints_.size(); ++i) {
+        const Shape::Constraint& c = shape.constraints_[i];
+        h.mix(static_cast<std::uint64_t>(c.sum));
+        for (std::uint32_t k = 0; k < c.count; ++k)
+            h.mix(static_cast<std::uint64_t>(shape.boxIds_[c.offset + k]) +
+                  0x9e3779b9ULL);
     }
     return h.finalize();
 }

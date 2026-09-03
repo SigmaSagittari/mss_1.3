@@ -134,6 +134,7 @@ struct OrderStats {
 // 只采样真实对局中的 Structure component；两种抛光成品共用同一个 graph、
 // 同一个展开基序（lexBfsOrder）与同一个直径端点 init。
 inline void testDistributionOrders(Rng& rng, const TestConfig& config) {
+    TimeBox timebox(config.seconds);
     long long positions = 0;
     long long games = 0;
     long long components = 0;
@@ -142,10 +143,10 @@ inline void testDistributionOrders(Rng& rng, const TestConfig& config) {
     int greatestWidth = -1;
     const char* greatestAlgorithm = nullptr;
     ObservedBoard greatestWidthBoard;
-    while (positions < config.expectedPositions && counters().failures == 0) {
+    while (!timebox.expired() && counters().failures == 0) {
         ++games;
         generateGame(config, rng, [&](const Snapshot& snapshot) {
-            if (positions == config.expectedPositions || counters().failures != 0) return;
+            if (timebox.expired() || counters().failures != 0) return;
 
             for (const Structure::Instance& instance : snapshot.analysis.structure.components) {
                 const auto graph = OrderProbe::makeGreedyOrderGraph(*instance.shape);
@@ -207,7 +208,8 @@ inline void testDistributionOrders(Rng& rng, const TestConfig& config) {
         });
     }
     std::cout << "distribution/order-width: " << positions << " positions from "
-              << games << " games, " << components << " components\n";
+              << games << " games, " << components << " components in "
+              << timebox.elapsedSeconds() << "s\n";
     lexBfsPolishedStats.print("lex-bfs-polished");
     lexBfsWindow3Stats.print("lex-bfs-window3");
     std::cout << "distribution/max-width-board: algorithm=" << greatestAlgorithm

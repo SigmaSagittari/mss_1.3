@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -11,6 +12,7 @@
 
 #include "analysis/basic.h"
 #include "analysis/distribution/distribution.h"
+#include "analysis/distribution/distribution_graph.h"
 #include "analysis/probability/exact.h"
 #include "analysis/structure.h"
 
@@ -88,7 +90,7 @@ inline void logerr(std::string_view message, const ObservedBoard& board,
         for (std::size_t i = 0; i < structure->components.size(); ++i) {
             const auto& c = structure->components[i];
             std::cerr << "  component " << i << ": boxes=" << c.boxes.count()
-                      << " constraints=" << c.shape->constraints.size() << '\n';
+                      << " constraints=" << c.shape->constraintCount() << '\n';
         }
     }
 }
@@ -100,13 +102,35 @@ inline void logerr(std::string_view message, const ObservedBoard& board,
     } } while (false)
 
 enum class PositionFilter { All, GuessOnly };
+// 分布层实现选择：Old = 旧 Distribution::Solver；Graph = 图算法实现。
+enum class DistributionMode { Old, Graph };
+// 所有测试模块共用的统一配置。perf 类模块的驱动量统一为时间盒（seconds），
+// 不再以局面数量为终止条件：跑满时间盒，输出该盒内的吞吐。
+struct TimeBox {
+    std::chrono::steady_clock::time_point start;
+    std::chrono::steady_clock::time_point deadline;
+
+    explicit TimeBox(double seconds)
+        : start(std::chrono::steady_clock::now()),
+          deadline(start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                              std::chrono::duration<double>(seconds))) {}
+
+    bool expired() const { return std::chrono::steady_clock::now() >= deadline; }
+    double elapsedSeconds() const {
+        return std::chrono::duration<double>(
+                   std::chrono::steady_clock::now() - start)
+            .count();
+    }
+};
+
 // 所有真实对局测试共用的采样配置。每个测试只额外声明自身特有的参数。
 struct TestConfig {
     int rows = 16;
     int cols = 30;
     int mines = 99;
-    long long expectedPositions = 10000;
+    double seconds = 60.0;             // 统一时间盒（perf 模块的驱动量）
     PositionFilter filter = PositionFilter::All;  // All：全部局面；GuessOnly：只留必须猜的局面
+    DistributionMode distributionMode = DistributionMode::Graph;  // 默认新版图算法
     int maxRestarts = 10000;                      // requireWinningGame 时生成一条可赢对局的重试上限
     bool requireWinningGame = false;
     bool firstMoveSafe = false;
@@ -154,32 +178,85 @@ struct Game {
     bool won() const { return opened == board.rows * board.cols - board.totalMines; }
 };
 
+// Graph 模式桥接：把图算法分布装进旧池（Distribution::DistPool）。Exact 的
+// 取数路径不变（Solver::analyze → pool.get 缓存优先），命中即 graph 数据，
+// 旧 DFS 不运行——分析层零改动，开关完全由 test 层控制。
+inline void bridgeGraphDistributions(const Structure::Result& structure,
+                                     DistributionSolver::DistPool& graphPool,
+                                     Distribution::DistPool& oldPool) {
+    for (const Structure::Instance& inst : structure.components) {
+        if (oldPool.get(inst.shape) != nullptr) continue;  // 已桥接（同 shape 幂等）
+        const DistributionSolver::Distribution* g =
+            DistributionSolver::analyze(*inst.shape, graphPool);
+        Distribution legacy;
+        legacy.entries.reserve(g->entries.size());
+        for (const DistributionSolver::Distribution::Entry& e : g->entries) {
+            Distribution::Entry outEntry;
+            outEntry.mineCount = e.mineCount;
+            outEntry.ways = e.ways;
+            outEntry.perBoxExpectation = e.perBoxExpectation;
+            legacy.entries.push_back(std::move(outEntry));
+        }
+        oldPool.insert(inst.shape, std::move(legacy));
+    }
+}
+
 struct Analysis {
     Basic::Result basic;
     Structure::ShapePool shapes;
     Structure::Result structure;
-    Distribution::DistPool distributions;
+    Distribution::DistPool distributions;            // 旧实现池（Graph 模式时为桥接容器）
+    DistributionSolver::DistPool graphDistributions; // 图算法分布池
+    DistributionMode distributionMode;               // 主路径分布实现选择
     Probability::Result probability;
-    explicit Analysis(const ObservedBoard& b) : basic(Basic::analyze(b)),
-        structure(Structure::analyze(b, basic, shapes)),
-        probability(Exact::analyze(b, basic, structure, distributions)) {}
+    explicit Analysis(const ObservedBoard& b, DistributionMode mode)
+        : basic(Basic::analyze(b)),
+          structure(Structure::analyze(b, basic, shapes)),
+          distributionMode(mode) {
+        if (distributionMode == DistributionMode::Graph)
+            bridgeGraphDistributions(structure, graphDistributions, distributions);
+        probability = Exact::analyze(b, basic, structure, distributions);
+    }
 
     void update(const ObservedBoard& board, const Basic::Delta& updates) {
         Basic::update(board, basic, updates);
         Structure::update(board, basic, structure, shapes, updates);
+        if (distributionMode == DistributionMode::Graph)
+            bridgeGraphDistributions(structure, graphDistributions, distributions);
         probability = Exact::analyze(board, basic, structure, distributions);
     }
 };
 
 struct Move { int x = 0; int y = 0; long double mineProbability = 1.0L; };
 inline Move lowestRiskMove(const ObservedBoard& board, const Analysis& analysis) {
-    Move out;
-    for (int x = 1; x <= board.rows; ++x) for (int y = 1; y <= board.cols; ++y) {
-        if (board.board[x][y] != Cell::Hidden) continue;
-        const long double p = analysis.probability.mineProbability(board.id(x, y), board,
-            analysis.basic, analysis.structure);
-        if (p < out.mineProbability) out = Move{x, y, p};
-    }
+    using Mark = Basic::Mark;
+    // 原来对全盘每个 Hidden 格调 mineProbability（O(nm) 次查询）。实际只需：
+    //   - Safe 格（p=0）：全局最优，坐标序第一个即返回（与原语义一致）；
+    //   - 前沿格：frontierCells 按块枚举，概率直接取自 boxProbs，零逐格查询；
+    //   - 其余 Unknown 格：概率统一 = tCellProbability（probability.h:
+    //     mineProbability 对 Unknown 恒返回 tCellProbability），只需记住坐标序
+    //     第一个作兜底。
+    int fallbackX = 0;
+    int fallbackY = 0;
+    for (int x = 1; x <= board.rows; ++x)
+        for (int y = 1; y <= board.cols; ++y) {
+            if (board.board[x][y] != Cell::Hidden) continue;
+            const Mark mark = analysis.basic.marks[x][y];
+            if (mark == Mark::Safe) return Move{x, y, 0.0L};
+            if (mark == Mark::Unknown && fallbackX == 0) {
+                fallbackX = x;
+                fallbackY = y;
+            }
+        }
+
+    Move out;  // mineProbability = 1.0L；无前沿格时由兜底承担
+    analysis.probability.frontierCells(
+        board, analysis.structure,
+        [&](int x, int y, long double prob) {
+            if (prob < out.mineProbability) out = Move{x, y, prob};
+        });
+    if (fallbackX != 0 && out.mineProbability >= analysis.probability.tCellProbability)
+        out = Move{fallbackX, fallbackY, analysis.probability.tCellProbability};
     return out;
 }
 
@@ -197,7 +274,7 @@ inline void generateGame(const TestConfig& config, Rng& rng, Fn&& consume) {
             Basic::Delta firstMove;
             game.reveal(1, 1, firstMove);
         }
-        Analysis analysis(game.board);
+        Analysis analysis(game.board, config.distributionMode);
         while (!game.won()) {
             const Move move = lowestRiskMove(game.board, analysis);
             Basic::Delta updates;

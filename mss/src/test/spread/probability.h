@@ -5,12 +5,13 @@
 namespace mss::test {
 
 inline void testProbabilitySpread(Rng& rng, const TestConfig& config) {
+    TimeBox timebox(config.seconds);
     long long positions = 0;
     long long games = 0;
-    while (positions < config.expectedPositions && counters().failures == 0) {
+    while (!timebox.expired() && counters().failures == 0) {
         ++games;
         generateGame(config, rng, [&](const Snapshot& s) {
-            if (positions == config.expectedPositions || counters().failures != 0) return;
+            if (timebox.expired() || counters().failures != 0) return;
             const auto& board = s.game.board;
             const auto& basic = s.analysis.basic;
             const auto& structure = s.analysis.structure;
@@ -67,7 +68,7 @@ inline void testProbabilitySpread(Rng& rng, const TestConfig& config) {
         });
     }
     std::cout << "spread/probability: " << positions << " positions from "
-              << games << " games\n";
+              << games << " games in " << timebox.elapsedSeconds() << "s\n";
 }
 
 }  // namespace mss::test

@@ -182,9 +182,9 @@ private:
     //   analysis 逐层流式构建的 layout/slotOf/gather 表提供；转移只是一
     //   次按 gather 表的逐槽拷贝（幸存者继承旧槽，v 恒追加在末尾）。
     //
-    //   合并判据 = mineCount（累计雷数 t）+ packed 整体相等。关闭/未赋值
-    //   槽恒为 0 且每层所有状态相同，不参与区分 —— 与旧实现"全向量相等"
-    //   完全等价的判据，只是不再反复搬 n 个槽。
+    //   合并判据只有 packed 整体相等。累计雷数不是状态：相同 frontier 的
+    //   历史可以合并，其不同的累计雷数作为 Value 内的一条稀疏分布保存。
+    //   关闭/未赋值槽恒为 0 且每层所有状态相同，不参与区分。
     //
     // 封口与关闭都是静态的，由 order 位置推出：
     //   封口：约束 c 的成员在 order 中的最晚位置 lastPos，层 k == lastPos
@@ -196,8 +196,7 @@ private:
     // 自己的 moment；之后随路径权重缩放、与同 Key 状态相加。momentBoxes
     // 只列出已经关闭的 box，所以合并不扫描尚未写入的零列。
     //
-    // 平铺与复用：StateTable 用平铺数组保存 Key、Value、frontier 与 moments；
-    // 两层 thread_local 表交替复用跨调用容量，无逐状态 vector/堆分配。
+    // 每个 Entry 显式保存 State 与 Value；两层 thread_local Layer 交替复用。
     class dpHelper {
     public:
         // 入口：返回单组件分布表（契约同旧 Solver::analyze，entries 按
@@ -209,7 +208,7 @@ private:
 
     private:
         // StepPlan 是与路径无关的单步程序：analysis 由 Shape + order 编译一
-        // 步后立刻交给 StateTable 执行；运行期不再碰 Shape、layout 或
+        // 步后立刻交给 Layer 执行；运行期不再碰 Shape、layout 或
         // box→slot 映射。
         struct StepPlan {
             struct Check {
@@ -232,36 +231,42 @@ private:
             std::vector<Closing> closings; // 本步结算 moments 的 box
         };
 
-        struct StateKey {
-            int mineCount = 0;
+        struct State {
+            std::vector<char> frontier;
         };
 
-        struct StateValue {
-            long double ways = 0.0L;
+        struct Value {
+            struct Count {
+                int mineCount = 0;
+                long double ways = 0.0L;
+                std::vector<long double> moments;
+            };
+
+            // 同一 frontier 下按累计雷数分桶的方案数和各 box 一阶矩。
+            std::vector<Count> counts;
         };
 
-        // 一层 DP 表。同层状态共享 frontier 宽度；frontiers 与 moments 都按
-        // 状态平铺。momentBoxes 只记录哪些列已经有值，因此合并不扫描零列。
-        class StateTable {
+        struct Entry {
+            State state;
+            Value value;
+        };
+
+        // 一层 DP 表：每个 Entry 都是完整的 State + Value。momentBoxes 只记录
+        // 已经有值的列，因此合并不扫描未关闭 box 的零 moments。
+        class Layer {
         public:
             void reset(int boxCount);
-            void advance(const StepPlan& plan, StateTable& next) const;
+            void advance(const StepPlan& plan, Layer& next) const;
 
-            std::vector<StateKey> keys;
-            std::vector<StateValue> values;
-            std::vector<char> frontiers;
-            std::vector<long double> moments;
+            std::vector<Entry> entries;
             std::vector<BoxId> momentBoxes;
             FlatHashTable<U128, std::size_t, U128Hash> index;
             int boxCount = 0;
-            int frontierSize = 0;
 
         private:
-            static U128 hashKey(int mineCount, const char* frontier, int frontierSize);
-
-            // 归 next 所有，跨 advance 调用复用；它们不是 DP 状态。
-            mutable std::vector<char> frontierWork;
-            mutable std::vector<long double> momentWork;
+            static U128 hashKey(const State& state);
+            static Value::Count& findOrAddCount(Value& value, int mineCount,
+                                                 int boxCount);
         };
     };
 
@@ -318,116 +323,99 @@ inline long double DistributionSolver::binom(int n, int k) {
     return kComb[n][k];
 }
 
-inline U128 DistributionSolver::dpHelper::StateTable::hashKey(
-    int mineCount, const char* frontier, int frontierSize) {
+inline U128 DistributionSolver::dpHelper::Layer::hashKey(const State& state) {
     U128Hasher hasher;
-    hasher.mix(mineCount);
-    for (int slot = 0; slot < frontierSize; ++slot)
+    for (char mine : state.frontier)
         hasher.mix(static_cast<std::uint64_t>(
-            static_cast<unsigned char>(frontier[slot])));
+            static_cast<unsigned char>(mine)));
     return hasher.finalize();
 }
 
-inline void DistributionSolver::dpHelper::StateTable::reset(int initialBoxCount) {
-    keys.clear();
-    values.clear();
-    frontiers.clear();
-    moments.clear();
+inline void DistributionSolver::dpHelper::Layer::reset(int initialBoxCount) {
+    entries.clear();
     momentBoxes.clear();
     index.clear();
     boxCount = initialBoxCount;
-    frontierSize = 0;
-    keys.push_back(StateKey{.mineCount = 0});
-    values.push_back(StateValue{.ways = 1.0L});
-    moments.assign(boxCount, 0.0L);
+    Entry initial;
+    Value::Count count;
+    count.ways = 1.0L;
+    count.moments.assign(boxCount, 0.0L);
+    initial.value.counts.push_back(std::move(count));
+    entries.push_back(std::move(initial));
 }
 
-inline void DistributionSolver::dpHelper::StateTable::advance(
-    const StepPlan& plan, StateTable& next) const {
-    next.keys.clear();
-    next.values.clear();
-    next.frontiers.clear();
-    next.moments.clear();
+inline DistributionSolver::dpHelper::Value::Count&
+DistributionSolver::dpHelper::Layer::findOrAddCount(
+    Value& value, int mineCount, int boxCount) {
+    for (Value::Count& count : value.counts)
+        if (count.mineCount == mineCount) return count;
+    Value::Count count;
+    count.mineCount = mineCount;
+    count.moments.assign(boxCount, 0.0L);
+    value.counts.push_back(std::move(count));
+    return value.counts.back();
+}
+
+inline void DistributionSolver::dpHelper::Layer::advance(
+    const StepPlan& plan, Layer& next) const {
+    next.entries.clear();
     next.index.clear();
     next.boxCount = boxCount;
-    next.frontierSize = static_cast<int>(plan.gather.size());
     next.momentBoxes = momentBoxes;
     for (const StepPlan::Closing& closing : plan.closings)
         next.momentBoxes.push_back(closing.box);
 
-    const std::size_t estimate = keys.size() * (plan.boxSize + 1);
-    next.keys.reserve(estimate);
-    next.values.reserve(estimate);
-    next.frontiers.reserve(estimate * next.frontierSize);
-    next.moments.reserve(estimate * boxCount);
+    const std::size_t estimate = entries.size() * (plan.boxSize + 1);
+    next.entries.reserve(estimate);
     next.index.reserve(estimate);
-    if (next.frontierWork.size() < next.frontierSize)
-        next.frontierWork.resize(next.frontierSize);
-    if (next.momentWork.size() < boxCount)
-        next.momentWork.resize(boxCount);
 
-    for (std::size_t state = 0; state < keys.size(); ++state) {
-        const StateKey key = keys[state];
-        const long double ways = values[state].ways;
-        const char* frontier =
-            frontiers.data() + state * frontierSize;
-        const long double* moment =
-            moments.data() + state * boxCount;
+    for (const Entry& entry : entries) {
+        const State& state = entry.state;
+        const Value& value = entry.value;
 
         int minMine = 0;
         int maxMine = plan.boxSize;
         for (const StepPlan::Check& check : plan.checks) {
             int partial = 0;
             for (int i = 0; i < check.readSlotCount; ++i)
-                partial += frontier[check.readSlots[i]];
+                partial += state.frontier[check.readSlots[i]];
             minMine = std::max(minMine, check.sum - partial - check.remAfter);
             maxMine = std::min(maxMine, check.sum - partial);
         }
 
         for (int mine = minMine; mine <= maxMine; ++mine) {
             const long double factor = DistributionSolver::binom(plan.boxSize, mine);
-            const long double nextWays = ways * factor;
-            for (int slot = 0; slot < next.frontierSize; ++slot) {
-                const int source = plan.gather[slot];
-                next.frontierWork[slot] =
-                    source < 0 ? static_cast<char>(mine)
-                               : frontier[source];
-            }
-            std::fill(next.momentWork.begin(),
-                      next.momentWork.begin() + boxCount, 0.0L);
-            for (BoxId box : momentBoxes)
-                next.momentWork[box] =
-                    moment[box] * factor;
-            for (const StepPlan::Closing& closing : plan.closings) {
-                const long double boxMineCount = closing.oldSlot < 0
-                    ? static_cast<long double>(mine)
-                    : static_cast<long double>(frontier[closing.oldSlot]);
-                next.momentWork[closing.box] +=
-                    boxMineCount * nextWays;
+            Entry candidate;
+            candidate.state.frontier.reserve(plan.gather.size());
+            for (int source : plan.gather) {
+                candidate.state.frontier.push_back(
+                    source < 0 ? static_cast<char>(mine) : state.frontier[source]);
             }
 
-            const int nextMineCount = key.mineCount + mine;
-            const U128 hash = hashKey(nextMineCount, next.frontierWork.data(), next.frontierSize);
+            const U128 hash = hashKey(candidate.state);
+            Entry* target;
             if (const std::size_t* found = next.index.find(hash)) {
-                const std::size_t target = *found;
-                next.values[target].ways += nextWays;
-                long double* targetMoment =
-                    next.moments.data() + target * boxCount;
-                for (BoxId box : momentBoxes)
-                    targetMoment[box] +=
-                        next.momentWork[box];
-                for (const StepPlan::Closing& closing : plan.closings)
-                    targetMoment[closing.box] +=
-                        next.momentWork[closing.box];
+                target = &next.entries[*found];
             } else {
-                const std::size_t id = next.keys.size();
-                next.keys.push_back(StateKey{.mineCount = nextMineCount});
-                next.values.push_back(StateValue{.ways = nextWays});
-                next.frontiers.insert(next.frontiers.end(), next.frontierWork.begin(),
-                                      next.frontierWork.begin() + next.frontierSize);
-                next.moments.insert(next.moments.end(), next.momentWork.begin(),
-                                    next.momentWork.begin() + boxCount);
+                const std::size_t id = next.entries.size();
+                next.entries.push_back(std::move(candidate));
                 next.index.emplace(hash, id);
+                target = &next.entries.back();
+            }
+
+            for (const Value::Count& source : value.counts) {
+                Value::Count& targetCount = findOrAddCount(
+                    target->value, source.mineCount + mine, boxCount);
+                const long double ways = source.ways * factor;
+                targetCount.ways += ways;
+                for (BoxId box : momentBoxes)
+                    targetCount.moments[box] += source.moments[box] * factor;
+                for (const StepPlan::Closing& closing : plan.closings) {
+                    const long double boxMineCount = closing.oldSlot < 0
+                        ? static_cast<long double>(mine)
+                        : static_cast<long double>(state.frontier[closing.oldSlot]);
+                    targetCount.moments[closing.box] += boxMineCount * ways;
+                }
             }
         }
     }
@@ -451,14 +439,14 @@ inline DistributionSolver::Distribution DistributionSolver::dpHelper::analysis(
     constraintNext.clear();
     constraintIds.clear();
     std::size_t constraintIncidences = 0;
-    for (const Structure::Shape::Constraint& constraint : shape.constraints)
-        constraintIncidences += constraint.boxIds.size();
+    for (std::size_t i = 0; i < shape.constraintCount(); ++i)
+        constraintIncidences += shape.constraint(i).boxIds.size();
     constraintNext.reserve(constraintIncidences);
     constraintIds.reserve(constraintIncidences);
-    for (int constraintId = 0; constraintId < static_cast<int>(shape.constraints.size());
+    for (int constraintId = 0; constraintId < static_cast<int>(shape.constraintCount());
          ++constraintId) {
-        const Structure::Shape::Constraint& constraint =
-            shape.constraints[constraintId];
+        const Structure::Shape::ConstraintView constraint =
+            shape.constraint(constraintId);
         int lastStep = -1;
         for (BoxId box : constraint.boxIds)
             lastStep = std::max(lastStep, position[box]);
@@ -494,11 +482,11 @@ inline DistributionSolver::Distribution DistributionSolver::dpHelper::analysis(
     layout.reserve(boxCount);
     nextLayout.reserve(boxCount);
 
-    // 线程局部双层表：StateTable 的容量跨 analyze 调用复用。
-    static thread_local StateTable tlCur;
-    static thread_local StateTable tlNext;
-    StateTable* cur = &tlCur;
-    StateTable* next = &tlNext;
+    // 线程局部双层表：Layer 的容量跨 analyze 调用复用。
+    static thread_local Layer tlCur;
+    static thread_local Layer tlNext;
+    Layer* cur = &tlCur;
+    Layer* next = &tlNext;
     cur->reset(boxCount);
 
     // StepPlan 只在编译完成的那一刻被消费；复用它的三个缓冲区，避免每个
@@ -512,8 +500,8 @@ inline DistributionSolver::Distribution DistributionSolver::dpHelper::analysis(
         plan.boxSize = shape.boxes[plan.box].size;
         for (int index = constraintHead[plan.box]; index >= 0;
              index = constraintNext[index]) {
-            const Structure::Shape::Constraint& constraint =
-                shape.constraints[constraintIds[index]];
+            const Structure::Shape::ConstraintView constraint =
+                shape.constraint(constraintIds[index]);
             StepPlan::Check check;
             check.sum = constraint.sum;
             for (BoxId member : constraint.boxIds) {
@@ -560,21 +548,20 @@ inline DistributionSolver::Distribution DistributionSolver::dpHelper::analysis(
             closeStamp[box] = 0;
     }
 
-    // 末层物化：按 mineCount 升序出 entries（列 ÷ ways = perBoxExpectation）。
-    const std::size_t stateCount = cur->keys.size();
+    // 末层物化：唯一空 frontier 的 Value 就是组件的总雷数分布。
     Distribution result;
-    result.entries.reserve(stateCount);
-    for (std::size_t row = 0; row < stateCount; ++row) {
+    for (const Entry& source : cur->entries) {
+        result.entries.reserve(source.value.counts.size());
+        for (const Value::Count& count : source.value.counts) {
         Distribution::Entry entry;
-        entry.mineCount = cur->keys[row].mineCount;
-        entry.ways = cur->values[row].ways;
+        entry.mineCount = count.mineCount;
+        entry.ways = count.ways;
         entry.perBoxExpectation.resize(boxCount);
-        const long double* moment =
-            cur->moments.data() + row * boxCount;
         for (int box = 0; box < boxCount; ++box)
             entry.perBoxExpectation[box] =
-                moment[box] / entry.ways;
+                count.moments[box] / entry.ways;
         result.entries.push_back(std::move(entry));
+        }
     }
     std::sort(result.entries.begin(), result.entries.end(),
               [](const Distribution::Entry& lhs, const Distribution::Entry& rhs) {
@@ -605,14 +592,17 @@ inline DistributionSolver::Graph DistributionSolver::Graph::fromShape(
         to.push_back(target);
         head[from] = static_cast<int>(to.size()) - 1;
     };
-    for (const Structure::Shape::Constraint& constraint : shape.constraints)
-        for (std::size_t i = 0; i < constraint.boxIds.size(); ++i)
-            for (std::size_t j = i + 1; j < constraint.boxIds.size(); ++j) {
-                const BoxId lhs = constraint.boxIds[i];
-                const BoxId rhs = constraint.boxIds[j];
+    for (std::size_t i = 0; i < shape.constraintCount(); ++i) {
+        const Structure::Shape::ConstraintView constraint =
+            shape.constraint(i);
+        for (std::size_t a = 0; a < constraint.boxIds.size(); ++a)
+            for (std::size_t b = a + 1; b < constraint.boxIds.size(); ++b) {
+                const BoxId lhs = constraint.boxIds[a];
+                const BoxId rhs = constraint.boxIds[b];
                 addEdge(lhs, rhs);
                 addEdge(rhs, lhs);
             }
+    }
 
     // 第一遍：按源点去重并统计 CSR 行宽；第二遍会沿同一链表回退清除标记。
     for (BoxId box = 0; box < boxCount; ++box) {

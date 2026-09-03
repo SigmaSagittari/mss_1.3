@@ -91,12 +91,13 @@ struct LegacyBasic {
 // 可以漏掉概率恰为 0/1 的格子，但其推导出的 Safe / Mine 必须分别对应 0 / 1。
 inline void testBasicFloodProbability(
     Rng& rng, const TestConfig& config) {
+    TimeBox timebox(config.seconds);
     long long positions = 0;
     long long games = 0;
-    while (positions < config.expectedPositions && counters().failures == 0) {
+    while (!timebox.expired() && counters().failures == 0) {
         ++games;
         generateGame(config, rng, [&](const Snapshot& snapshot) {
-            if (positions == config.expectedPositions || counters().failures != 0) return;
+            if (timebox.expired() || counters().failures != 0) return;
 
             const ObservedBoard& board = snapshot.game.board;
             const Basic::Result legacyBasic = LegacyBasic::analyze(board);
@@ -132,7 +133,7 @@ inline void testBasicFloodProbability(
     }
 
     std::cout << "basic/flood-probability: " << positions << " positions from "
-              << games << " games\n";
+              << games << " games in " << timebox.elapsedSeconds() << "s\n";
 }
 
 }  // namespace mss::test

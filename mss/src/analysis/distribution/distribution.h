@@ -135,7 +135,7 @@ inline void Distribution::Solver::forEachAssignment(const Structure::Shape& shap
                                                     OnAssignment&& onAssignment,
                                                     std::uint64_t* searchNodes) {
     const int n = static_cast<int>(shape.boxes.size());
-    const int nc = static_cast<int>(shape.constraints.size());
+    const int nc = static_cast<int>(shape.constraintCount());
 
     // 线程局部复用工作区（无重入）：避免每次分析的嵌套 vector 分配。
     static thread_local std::vector<std::vector<int>> tlBoxLimits;
@@ -152,8 +152,10 @@ inline void Distribution::Solver::forEachAssignment(const Structure::Shape& shap
     tlAssignment.assign(n, 0);
 
     for (int i = 0; i < nc; ++i) {
-        tlConsSum[i] = shape.constraints[i].sum;
-        for (BoxId boxId : shape.constraints[i].boxIds) {
+        const Structure::Shape::ConstraintView cv =
+            shape.constraint(i);
+        tlConsSum[i] = cv.sum;
+        for (BoxId boxId : cv.boxIds) {
             tlConsMaxAdd[i] +=
                 shape.boxes[boxId].size;
             tlBoxLimits[boxId].push_back(i);
