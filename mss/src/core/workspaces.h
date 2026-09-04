@@ -49,7 +49,11 @@ struct StructureWs {
     // buildComponent（事务式：每轮 clear/assign）
     FlatHashTable<U128, BoxId, U128Hash> hashBox;    // 单位格哈希 → BoxId
     std::vector<BoxId> boxOfCells;                   // 格子 → BoxId（与单元格列表平行）
-    std::vector<std::vector<CellId>> buckets;        // 按 box 序的桶收集
+    // 每 box 的格桶：单 box ≤ 9 格（组内格子共邻任一数字，全落其 8 邻域 → ≤8，
+    // 留 1 余量）⇒ 定长 array 免嵌套小分配；桶数随 box 数自然增长、容量跨轮复用。
+    std::vector<std::array<CellId, 9>> buckets;
+    std::vector<std::uint8_t> bucketSize;            // 各桶实际格数（清空按它，不按 9 清）
+    std::vector<BoxId> boxCursor;                    // cells 平铺直填游标：第 b 个 box 的写位
     std::vector<char> boxUsed;                       // 约束去重标记
     std::vector<BoxId> allBoxIds;                    // 邻盒 id 平铺收集桶
 };

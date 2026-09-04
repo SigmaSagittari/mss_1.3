@@ -34,8 +34,8 @@
     <Filter Include="头文件\analysis\distribution">
       <UniqueIdentifier>{44635143-09b8-468b-8d86-412ccb8d9002}</UniqueIdentifier>
     </Filter>
-    <Filter Include="头文件\test\distribution">
-      <UniqueIdentifier>{D4A498C6-8CA3-4B68-84DA-B3B1544D8B77}</UniqueIdentifier>
+    <Filter Include="头文件\test">
+      <UniqueIdentifier>{bd2388a8-3948-49cc-96ca-211498b8e076}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -90,13 +90,33 @@
     <ClInclude Include="src\analysis\distribution\distribution.h">
       <Filter>头文件\analysis\distribution</Filter>
     </ClInclude>
+    <ClInclude Include="src\test\common.h">
+      <Filter>头文件\test</Filter>
+    </ClInclude>
+    <ClInclude Include="src\test\probability\conservation.h">
+      <Filter>头文件\test</Filter>
+    </ClInclude>
+    <ClInclude Include="src\test\performance\distribution_real_game.h">
+      <Filter>头文件\test</Filter>
+    </ClInclude>
     <ClInclude Include="src\test\distribution\greedy_order.h">
-      <Filter>头文件\test\distribution</Filter>
+      <Filter>头文件\test</Filter>
+    </ClInclude>
+    <ClInclude Include="src\test\move_hash.h">
+      <Filter>头文件\test</Filter>
+    </ClInclude>
+    <ClInclude Include="src\test\performance\real_game_probability.h">
+      <Filter>头文件\test</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\mss_1.2.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="src\test\harness.cpp">
+      <Filter>头文件\test</Filter>
+    </None>
   </ItemGroup>
 </Project>

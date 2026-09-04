@@ -19,7 +19,6 @@ namespace mss::test {
 // 基线用法：任何改动之后，只重新跑这个模块并对比下方基线即可，无需其他
 // 校验。基线配置：seed = 0xC0FFEE12345ULL，30x30 / 225 雷 / 20000 局 /
 // firstMoveSafe = true（即 harness.cpp 的 normal_test）。
-//   基线：move-hash-total: b153b2b60f75dd7c (20000 games, 3198953 moves)
 // ─────────────────────────────────────────────────────────────
 
 // FNV-1a 64 位：按原始字节折叠，long double 也按存储位参与（MSVC 下 80 位

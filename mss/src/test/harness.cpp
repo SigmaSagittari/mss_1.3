@@ -10,6 +10,7 @@
 #include "test/performance/distribution_real_game.h"
 #include "test/performance/real_game_probability.h"
 #include "test/probability/conservation.h"
+#include "test/structure/update_workspace.h"
 
 int main() {
     using namespace mss;
@@ -22,8 +23,8 @@ int main() {
         .rows = 30,
         .cols = 30,
         .mines = 225,
-        .seconds = -1.0,        // -1 = 不用时间盒（由 games 控制）
-        .games = 20000,          // 20000 局
+        .seconds = 20,        // -1 = 不用时间盒（由 games 控制）
+        .games = -1,          // 20000 局
         .filter = PositionFilter::All,
         .distributionMode = DistributionMode::Old,
         .maxRestarts = 10000,
@@ -39,7 +40,8 @@ int main() {
     //testDistributionOrders(seed, normal_test);
     //testDistributionRealGame(seed, normal_test);
     testRealGameProbabilityPerformance(seed, normal_test);
-    //testMoveHashes(seed, normal_test);
+    testMoveHashes(seed, normal_test); // 基线：move - hash - total: b153b2b60f75dd7c(20000 games, 3198953 moves)
+    //testUpdateWorkspaceClean(seed, normal_test);
 
     const long long failures = counters().failures;
     if (failures == 0) {
